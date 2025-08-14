@@ -50,6 +50,7 @@ export type Database = {
           daily_km: number | null
           id: string
           location_name: string | null
+          metadata: Json | null
           odometer_km: number
           reading_date: string
           user_id: string
@@ -60,6 +61,7 @@ export type Database = {
           daily_km?: number | null
           id?: string
           location_name?: string | null
+          metadata?: Json | null
           odometer_km: number
           reading_date: string
           user_id: string
@@ -70,6 +72,7 @@ export type Database = {
           daily_km?: number | null
           id?: string
           location_name?: string | null
+          metadata?: Json | null
           odometer_km?: number
           reading_date?: string
           user_id?: string

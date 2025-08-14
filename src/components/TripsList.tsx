@@ -13,10 +13,7 @@ interface Trip {
   daily_km: number;
   odometer_km: number;
   location_name: string | null;
-  metadata: {
-    purpose?: 'business' | 'personal';
-    description?: string;
-  } | null;
+  metadata: any; // Allow flexible metadata structure
   vehicle?: {
     display_name: string;
     model: string;

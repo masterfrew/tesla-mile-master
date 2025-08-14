@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Link } from 'react-router-dom';
 import { 
   Car, 
   Plus, 
@@ -177,10 +178,12 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <Button size="lg" className="bg-accent hover:bg-accent/90">
-                <Plus className="h-4 w-4 mr-2" />
-                Tesla Verbinden
-              </Button>
+              <Link to="/add-vehicle">
+                <Button size="lg" className="bg-accent hover:bg-accent/90">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Voertuig toevoegen
+                </Button>
+              </Link>
             </div>
           </div>
         ) : (
@@ -270,6 +273,12 @@ const Dashboard: React.FC = () => {
                 <CardTitle>Snelle acties</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
+                <Link to="/trips">
+                  <Button className="w-full justify-start" variant="outline">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Nieuwe rit toevoegen
+                  </Button>
+                </Link>
                 <Button className="w-full justify-start" variant="outline">
                   <Download className="h-4 w-4 mr-2" />
                   Export naar Excel
@@ -278,10 +287,12 @@ const Dashboard: React.FC = () => {
                   <BarChart3 className="h-4 w-4 mr-2" />
                   Maandrapport
                 </Button>
-                <Button className="w-full justify-start" variant="outline">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Voertuig toevoegen
-                </Button>
+                <Link to="/add-vehicle">
+                  <Button className="w-full justify-start" variant="outline">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Voertuig toevoegen
+                  </Button>
+                </Link>
               </CardContent>
             </Card>
           </div>
