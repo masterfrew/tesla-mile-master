@@ -14,7 +14,164 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      google_sheets_integrations: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean | null
+          last_sync_at: string | null
+          sheet_id: string
+          sheet_name: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          sheet_id: string
+          sheet_name?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          sheet_id?: string
+          sheet_name?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      mileage_readings: {
+        Row: {
+          created_at: string
+          daily_km: number | null
+          id: string
+          location_name: string | null
+          odometer_km: number
+          reading_date: string
+          user_id: string
+          vehicle_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_km?: number | null
+          id?: string
+          location_name?: string | null
+          odometer_km: number
+          reading_date: string
+          user_id: string
+          vehicle_id: string
+        }
+        Update: {
+          created_at?: string
+          daily_km?: number | null
+          id?: string
+          location_name?: string | null
+          odometer_km?: number
+          reading_date?: string
+          user_id?: string
+          vehicle_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mileage_readings_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          email: string | null
+          first_name: string | null
+          id: string
+          last_name: string | null
+          subscription_tier: string | null
+          tesla_access_token: string | null
+          tesla_refresh_token: string | null
+          tesla_token_expires_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          id?: string
+          last_name?: string | null
+          subscription_tier?: string | null
+          tesla_access_token?: string | null
+          tesla_refresh_token?: string | null
+          tesla_token_expires_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          id?: string
+          last_name?: string | null
+          subscription_tier?: string | null
+          tesla_access_token?: string | null
+          tesla_refresh_token?: string | null
+          tesla_token_expires_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      vehicles: {
+        Row: {
+          color: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          is_active: boolean | null
+          model: string | null
+          tesla_vehicle_id: number
+          updated_at: string
+          user_id: string
+          vin: string
+          year: number | null
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          model?: string | null
+          tesla_vehicle_id: number
+          updated_at?: string
+          user_id: string
+          vin: string
+          year?: number | null
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          model?: string | null
+          tesla_vehicle_id?: number
+          updated_at?: string
+          user_id?: string
+          vin?: string
+          year?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
