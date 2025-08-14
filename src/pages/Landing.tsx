@@ -35,7 +35,7 @@ const Landing = () => {
                 Kilometerregistratie
               </span>
               <br />
-              <span className="text-foreground">voor Tesla eigenaren</span>
+              <span className="text-foreground">voor Tesla-eigenaren</span>
             </h1>
             <p className="text-xl text-muted-foreground mb-8 max-w-3xl mx-auto">
               Automatiseer je kilometerregistratie met onze intuïtieve platform. 
