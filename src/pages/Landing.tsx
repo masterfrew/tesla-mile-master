@@ -39,7 +39,7 @@ const Landing = () => {
             </h1>
             <p className="text-xl text-muted-foreground mb-8 max-w-3xl mx-auto">
               Automatiseer je kilometerregistratie met onze intuïtieve platform. 
-              Perfect geïntegreerd met Google Sheets voor naadloze administratie.
+              Perfect geïntegreerd met Excel/Sheets sync voor naadloze administratie.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link to="/auth">
@@ -69,7 +69,7 @@ const Landing = () => {
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
               Ontworpen specifiek voor Tesla eigenaren die hun kilometerregistratie 
-              willen professionaliseren en automatiseren.
+              willen professionaliseren met Excel/Sheets integratie.
             </p>
           </div>
 
@@ -82,8 +82,8 @@ const Landing = () => {
               },
               {
                 icon: FileSpreadsheet,
-                title: "Google Sheets Sync",
-                description: "Automatische synchronisatie met je Google Sheets voor eenvoudige rapportage."
+                title: "Excel/Sheets Sync",
+                description: "Automatische synchronisatie met Excel en Google Sheets voor eenvoudige rapportage."
               },
               {
                 icon: BarChart3,
