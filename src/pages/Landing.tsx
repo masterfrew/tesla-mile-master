@@ -12,9 +12,9 @@ const Landing = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-2">
-              <Car className="h-8 w-8 text-primary" />
+              <Car className="h-8 w-8 text-primary animate-bounce" />
               <span className="text-xl font-bold bg-gradient-to-r from-primary to-primary-glow bg-clip-text text-transparent">
-                Tesla Mile Master
+                KM Track
               </span>
             </div>
             <Link to="/auth">
@@ -65,11 +65,11 @@ const Landing = () => {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Waarom Tesla Mile Master?
+              Waarom KM Track?
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Ontworpen specifiek voor Tesla eigenaren die hun kilometerregistratie 
-              willen professionaliseren met Excel/Sheets integratie.
+              Slimme kilometerregistratie voor elke auto met automatische 
+              synchronisatie naar Excel/Sheets.
             </p>
           </div>
 
@@ -143,11 +143,11 @@ const Landing = () => {
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="flex items-center gap-2 mb-4 md:mb-0">
-              <Car className="h-6 w-6 text-primary" />
-              <span className="font-semibold">Tesla Mile Master</span>
+              <Car className="h-6 w-6 text-primary animate-pulse" />
+              <span className="font-semibold">KM Track</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              © 2024 Tesla Mile Master. Alle rechten voorbehouden.
+              © 2024 KM Track. Alle rechten voorbehouden.
             </p>
           </div>
         </div>
