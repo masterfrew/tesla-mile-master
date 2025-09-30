@@ -97,8 +97,6 @@ export type Database = {
           id: string
           last_name: string | null
           subscription_tier: string | null
-          tesla_access_token: string | null
-          tesla_refresh_token: string | null
           tesla_token_expires_at: string | null
           updated_at: string
           user_id: string
@@ -111,8 +109,6 @@ export type Database = {
           id?: string
           last_name?: string | null
           subscription_tier?: string | null
-          tesla_access_token?: string | null
-          tesla_refresh_token?: string | null
           tesla_token_expires_at?: string | null
           updated_at?: string
           user_id: string
@@ -125,8 +121,6 @@ export type Database = {
           id?: string
           last_name?: string | null
           subscription_tier?: string | null
-          tesla_access_token?: string | null
-          tesla_refresh_token?: string | null
           tesla_token_expires_at?: string | null
           updated_at?: string
           user_id?: string
@@ -180,7 +174,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_tesla_access_token: {
+        Args: { p_user_id: string }
+        Returns: string
+      }
+      get_tesla_refresh_token: {
+        Args: { p_user_id: string }
+        Returns: string
+      }
+      store_tesla_tokens: {
+        Args: {
+          p_access_token: string
+          p_expires_at: string
+          p_refresh_token: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
