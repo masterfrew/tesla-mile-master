@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Trips from "./pages/Trips";
 import AddVehicle from "./pages/AddVehicle";
+import TeslaCallback from "./pages/TeslaCallback";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,6 +26,7 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/trips" element={<Trips />} />
             <Route path="/add-vehicle" element={<AddVehicle />} />
+            <Route path="/tesla/callback" element={<TeslaCallback />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

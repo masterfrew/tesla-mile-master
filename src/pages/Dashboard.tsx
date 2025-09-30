@@ -19,6 +19,7 @@ import {
   Shield
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import TeslaConnect from '@/components/TeslaConnect';
 
 interface Profile {
   id: string;
@@ -178,12 +179,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <Link to="/add-vehicle">
-                <Button size="lg" className="bg-accent hover:bg-accent/90">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Voertuig toevoegen
-                </Button>
-              </Link>
+              <TeslaConnect />
             </div>
           </div>
         ) : (

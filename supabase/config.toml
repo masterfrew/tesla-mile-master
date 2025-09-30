@@ -1,1 +1,10 @@
 project_id = "hqpwepmdxzmuevalzkix"
+
+[functions.tesla-auth]
+verify_jwt = true
+
+[functions.tesla-vehicles]
+verify_jwt = true
+
+[functions.tesla-mileage]
+verify_jwt = true
