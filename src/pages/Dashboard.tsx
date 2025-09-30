@@ -269,17 +269,28 @@ const Dashboard: React.FC = () => {
                 <CardTitle>Snelle acties</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
+                <TeslaConnect />
                 <Link to="/trips">
                   <Button className="w-full justify-start" variant="outline">
                     <Plus className="h-4 w-4 mr-2" />
                     Nieuwe rit toevoegen
                   </Button>
                 </Link>
-                <Button className="w-full justify-start" variant="outline">
+                <Button 
+                  className="w-full justify-start" 
+                  variant="outline"
+                  disabled
+                  title="Binnenkort beschikbaar"
+                >
                   <Download className="h-4 w-4 mr-2" />
                   Export naar Excel
                 </Button>
-                <Button className="w-full justify-start" variant="outline">
+                <Button 
+                  className="w-full justify-start" 
+                  variant="outline"
+                  disabled
+                  title="Binnenkort beschikbaar"
+                >
                   <BarChart3 className="h-4 w-4 mr-2" />
                   Maandrapport
                 </Button>
