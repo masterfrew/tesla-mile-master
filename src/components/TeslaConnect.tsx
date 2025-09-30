@@ -1,30 +1,57 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Zap } from 'lucide-react';
+import { Zap, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 const TeslaConnect: React.FC = () => {
-  const handleConnect = () => {
-    const clientId = 'td-0f3e9e86-f759-42b9-a8e5-9f3b8f8b5f7a-c';
-    const redirectUri = `${window.location.origin}/tesla/callback`;
-    const state = Math.random().toString(36).substring(7);
-    
-    // Store state for verification
-    sessionStorage.setItem('tesla_oauth_state', state);
-    
-    const authUrl = new URL('https://auth.tesla.com/oauth2/v3/authorize');
-    authUrl.searchParams.append('client_id', clientId);
-    authUrl.searchParams.append('redirect_uri', redirectUri);
-    authUrl.searchParams.append('response_type', 'code');
-    authUrl.searchParams.append('scope', 'openid vehicle_device_data vehicle_cmds vehicle_charging_cmds');
-    authUrl.searchParams.append('state', state);
-    
-    window.location.href = authUrl.toString();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleConnect = async () => {
+    try {
+      setIsLoading(true);
+      const redirectUri = `${window.location.origin}/tesla/callback`;
+      
+      const { data, error } = await supabase.functions.invoke('tesla-oauth-url', {
+        body: { redirectUri }
+      });
+
+      if (error) throw error;
+
+      if (!data?.authUrl || !data?.state) {
+        throw new Error('Invalid response from server');
+      }
+
+      // Store state for verification
+      sessionStorage.setItem('tesla_oauth_state', data.state);
+      
+      // Redirect to Tesla OAuth
+      window.location.href = data.authUrl;
+    } catch (error) {
+      console.error('Error initiating Tesla connection:', error);
+      toast.error('Fout bij verbinden met Tesla. Probeer het later opnieuw.');
+      setIsLoading(false);
+    }
   };
 
   return (
-    <Button size="lg" onClick={handleConnect} className="bg-accent hover:bg-accent/90">
-      <Zap className="h-4 w-4 mr-2" />
-      Verbind met Tesla
+    <Button 
+      size="lg" 
+      onClick={handleConnect} 
+      className="bg-accent hover:bg-accent/90"
+      disabled={isLoading}
+    >
+      {isLoading ? (
+        <>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          Verbinden...
+        </>
+      ) : (
+        <>
+          <Zap className="h-4 w-4 mr-2" />
+          Verbind met Tesla
+        </>
+      )}
     </Button>
   );
 };

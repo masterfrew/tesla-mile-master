@@ -1,5 +1,8 @@
 project_id = "hqpwepmdxzmuevalzkix"
 
+[functions.tesla-oauth-url]
+verify_jwt = false
+
 [functions.tesla-auth]
 verify_jwt = true
 
