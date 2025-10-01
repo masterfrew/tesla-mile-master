@@ -18,7 +18,8 @@ serve(async (req) => {
 
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
-    const redirectUri = `${req.headers.get('origin')}/tesla/callback`;
+    // Must match the exact redirect URI used in the OAuth authorization request
+    const redirectUri = 'https://kmtrack.nl/oauth2callback';
 
     if (!clientId || !clientSecret) {
       throw new Error('Tesla credentials not configured');
