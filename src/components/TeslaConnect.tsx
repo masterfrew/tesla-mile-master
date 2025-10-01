@@ -10,12 +10,8 @@ const TeslaConnect: React.FC = () => {
   const handleConnect = async () => {
     try {
       setIsLoading(true);
-      // Use the exact redirect URI configured in Tesla Developer Console
-      const redirectUri = 'https://kmtrack.nl/oauth2callback';
       
-      const { data, error } = await supabase.functions.invoke('tesla-oauth-url', {
-        body: { redirectUri }
-      });
+      const { data, error } = await supabase.functions.invoke('tesla-start');
 
       if (error) throw error;
 
@@ -26,7 +22,7 @@ const TeslaConnect: React.FC = () => {
       // Store state for verification
       sessionStorage.setItem('tesla_oauth_state', data.state);
       
-      // Redirect to Tesla OAuth
+      // Redirect to Tesla OAuth with PKCE
       window.location.href = data.authUrl;
     } catch (error) {
       console.error('Error initiating Tesla connection:', error);

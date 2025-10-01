@@ -88,6 +88,27 @@ export type Database = {
           },
         ]
       }
+      oauth_pkce_state: {
+        Row: {
+          code_verifier: string
+          created_at: string
+          nonce: string
+          user_id: string
+        }
+        Insert: {
+          code_verifier: string
+          created_at?: string
+          nonce: string
+          user_id: string
+        }
+        Update: {
+          code_verifier?: string
+          created_at?: string
+          nonce?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           company_name: string | null
@@ -174,6 +195,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cleanup_expired_pkce_states: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
       get_tesla_access_token: {
         Args: { p_user_id: string }
         Returns: string

@@ -13,20 +13,83 @@ serve(async (req) => {
   }
 
   try {
-    const { code } = await req.json();
-    console.log('Received authorization code for Tesla OAuth');
+    const { code, state } = await req.json();
+    console.log('[tesla-auth] Received callback:', {
+      hasCode: !!code,
+      hasState: !!state,
+      state: state?.substring(0, 10) + '...',
+    });
+
+    if (!code) {
+      console.error('[tesla-auth] ERROR: missing_code');
+      throw new Error('No authorization code provided');
+    }
+
+    if (!state) {
+      console.error('[tesla-auth] ERROR: missing_state');
+      throw new Error('No state provided');
+    }
+
+    // Get user from auth header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      console.error('[tesla-auth] ERROR: missing_authorization_header');
+      throw new Error('No authorization header');
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+
+    if (userError || !user) {
+      console.error('[tesla-auth] ERROR: user_not_authenticated', userError);
+      throw new Error('User not authenticated');
+    }
+
+    console.log('[tesla-auth] User authenticated:', user.id);
+
+    // Retrieve and validate PKCE state
+    const { data: pkceData, error: pkceError } = await supabase
+      .from('oauth_pkce_state')
+      .select('code_verifier, user_id')
+      .eq('nonce', state)
+      .eq('user_id', user.id)
+      .single();
+
+    if (pkceError || !pkceData) {
+      console.error('[tesla-auth] ERROR: invalid_or_expired_state', {
+        error: pkceError,
+        hasData: !!pkceData,
+      });
+      throw new Error('Invalid or expired state parameter');
+    }
+
+    console.log('[tesla-auth] PKCE state validated successfully');
+
+    const codeVerifier = pkceData.code_verifier;
+
+    // Delete used state immediately
+    await supabase
+      .from('oauth_pkce_state')
+      .delete()
+      .eq('nonce', state);
+
+    console.log('[tesla-auth] Used PKCE state deleted');
 
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
-    // Must match the exact redirect URI used in the OAuth authorization request
     const redirectUri = 'https://kmtrack.nl/oauth2callback';
 
     if (!clientId || !clientSecret) {
+      console.error('[tesla-auth] ERROR: tesla_credentials_not_configured');
       throw new Error('Tesla credentials not configured');
     }
 
-    // Exchange authorization code for access token
-    console.log('Exchanging code for tokens...');
+    // Exchange authorization code for access token with PKCE
+    console.log('[tesla-auth] Exchanging code for tokens with PKCE...');
     const tokenResponse = await fetch('https://auth.tesla.com/oauth2/v3/token', {
       method: 'POST',
       headers: {
@@ -38,41 +101,27 @@ serve(async (req) => {
         client_secret: clientSecret,
         code: code,
         redirect_uri: redirectUri,
+        code_verifier: codeVerifier,
       }),
     });
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
-      console.error('Tesla token exchange failed:', errorText);
+      console.error('[tesla-auth] ERROR: token_exchange_failed', {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        error: errorText,
+      });
       throw new Error(`Failed to exchange code: ${errorText}`);
     }
 
     const tokenData = await tokenResponse.json();
-    console.log('Successfully received tokens from Tesla');
-
-    // Get user from auth header
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('No authorization header');
-    }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Extract JWT token
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-
-    if (userError || !user) {
-      console.error('Failed to get user:', userError);
-      throw new Error('User not authenticated');
-    }
-
-    console.log('Storing tokens for user:', user.id);
+    console.log('[tesla-auth] SUCCESS: Received tokens from Tesla');
 
     // Calculate expiry timestamp
     const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
+
+    console.log('[tesla-auth] Storing tokens for user:', user.id);
 
     // Store tokens using the secure vault function
     const { error: storeError } = await supabase.rpc('store_tesla_tokens', {
@@ -83,11 +132,11 @@ serve(async (req) => {
     });
 
     if (storeError) {
-      console.error('Failed to store tokens:', storeError);
+      console.error('[tesla-auth] ERROR: failed_to_store_tokens', storeError);
       throw storeError;
     }
 
-    console.log('Successfully stored Tesla tokens');
+    console.log('[tesla-auth] SUCCESS: Tesla tokens stored successfully');
 
     return new Response(
       JSON.stringify({ 
@@ -98,7 +147,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in tesla-auth:', error);
+    console.error('[tesla-auth] FATAL_ERROR:', error.message);
     return new Response(
       JSON.stringify({ error: error.message }),
       { 
