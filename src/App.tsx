@@ -27,6 +27,7 @@ const App = () => (
             <Route path="/trips" element={<Trips />} />
             <Route path="/add-vehicle" element={<AddVehicle />} />
             <Route path="/tesla/callback" element={<TeslaCallback />} />
+            <Route path="/oauth2callback" element={<TeslaCallback />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

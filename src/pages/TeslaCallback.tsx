@@ -67,7 +67,7 @@ const TeslaCallback: React.FC = () => {
         });
 
         // Redirect to dashboard
-        navigate('/dashboard');
+        navigate('/');
 
       } catch (error) {
         console.error('Tesla callback error:', error);
@@ -76,7 +76,7 @@ const TeslaCallback: React.FC = () => {
           description: error instanceof Error ? error.message : 'Onbekende fout',
           variant: "destructive",
         });
-        navigate('/dashboard');
+        navigate('/');
       }
     };
 

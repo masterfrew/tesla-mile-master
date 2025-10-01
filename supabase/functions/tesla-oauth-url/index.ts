@@ -20,16 +20,21 @@ serve(async (req) => {
       throw new Error('Tesla Client ID not configured');
     }
 
+    // Use the provided redirect URI (should be https://kmtrack.nl/oauth2callback for production)
+    const finalRedirectUri = redirectUri || 'https://kmtrack.nl/oauth2callback';
+
     const state = crypto.randomUUID();
     
     const authUrl = new URL('https://auth.tesla.com/oauth2/v3/authorize');
     authUrl.searchParams.append('client_id', clientId);
-    authUrl.searchParams.append('redirect_uri', redirectUri);
+    authUrl.searchParams.append('redirect_uri', finalRedirectUri);
     authUrl.searchParams.append('response_type', 'code');
     authUrl.searchParams.append('scope', 'openid vehicle_device_data vehicle_cmds vehicle_charging_cmds');
     authUrl.searchParams.append('state', state);
 
-    console.log('Generated Tesla OAuth URL with client_id:', clientId.substring(0, 10) + '...');
+    console.log('Generated Tesla OAuth URL');
+    console.log('- Client ID:', clientId.substring(0, 10) + '...');
+    console.log('- Redirect URI:', finalRedirectUri);
 
     return new Response(
       JSON.stringify({ 
