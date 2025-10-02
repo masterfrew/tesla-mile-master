@@ -89,10 +89,12 @@ serve(async (req) => {
 
     console.log('[tesla-start] PKCE state stored successfully');
 
-    // Clean up old states
-    await supabase.rpc('cleanup_expired_pkce_states').catch(err => {
+    // Clean up old states (non-blocking)
+    try {
+      await supabase.rpc('cleanup_expired_pkce_states');
+    } catch (err) {
       console.warn('[tesla-start] WARN: cleanup_failed', err);
-    });
+    }
 
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     if (!clientId) {
