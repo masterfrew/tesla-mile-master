@@ -37,16 +37,24 @@ interface Vehicle {
   is_active: boolean;
 }
 
+interface MileageStats {
+  thisMonth: number;
+  thisYear: number;
+  monthlyAverage: number;
+}
+
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (user) {
       fetchProfile();
       fetchVehicles();
+      fetchMileageStats();
     }
   }, [user]);
 
@@ -88,6 +96,38 @@ const Dashboard: React.FC = () => {
       console.error('Error fetching vehicles:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchMileageStats = async () => {
+    try {
+      const now = new Date();
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const firstDayOfYear = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
+
+      // Get this month's mileage
+      const { data: monthData } = await supabase
+        .from('mileage_readings')
+        .select('daily_km')
+        .eq('user_id', user?.id)
+        .gte('reading_date', firstDayOfMonth);
+
+      const thisMonth = monthData?.reduce((sum, r) => sum + (r.daily_km || 0), 0) || 0;
+
+      // Get this year's mileage
+      const { data: yearData } = await supabase
+        .from('mileage_readings')
+        .select('daily_km')
+        .eq('user_id', user?.id)
+        .gte('reading_date', firstDayOfYear);
+
+      const thisYear = yearData?.reduce((sum, r) => sum + (r.daily_km || 0), 0) || 0;
+      const monthsElapsed = now.getMonth() + 1;
+      const monthlyAverage = monthsElapsed > 0 ? Math.round(thisYear / monthsElapsed) : 0;
+
+      setMileageStats({ thisMonth, thisYear, monthlyAverage });
+    } catch (error) {
+      console.error('Error fetching mileage stats:', error);
     }
   };
 
@@ -192,9 +232,11 @@ const Dashboard: React.FC = () => {
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">1,247 km</div>
+                <div className="text-2xl font-bold">
+                  {mileageStats.thisMonth > 0 ? `${mileageStats.thisMonth.toLocaleString('nl-NL')} km` : 'Geen data'}
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  +12% t.o.v. vorige maand
+                  {mileageStats.thisMonth > 0 ? 'Huidige maand' : 'Synchroniseer uw Tesla'}
                 </p>
               </CardContent>
             </Card>
@@ -205,9 +247,14 @@ const Dashboard: React.FC = () => {
                 <Calendar className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">12,458 km</div>
+                <div className="text-2xl font-bold">
+                  {mileageStats.thisYear > 0 ? `${mileageStats.thisYear.toLocaleString('nl-NL')} km` : 'Geen data'}
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Gemiddeld 1,038 km/maand
+                  {mileageStats.monthlyAverage > 0 
+                    ? `Gemiddeld ${mileageStats.monthlyAverage.toLocaleString('nl-NL')} km/maand`
+                    : 'Synchroniseer uw Tesla'
+                  }
                 </p>
               </CardContent>
             </Card>
@@ -276,24 +323,6 @@ const Dashboard: React.FC = () => {
                     Nieuwe rit toevoegen
                   </Button>
                 </Link>
-                <Button 
-                  className="w-full justify-start" 
-                  variant="outline"
-                  disabled
-                  title="Binnenkort beschikbaar"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Export naar Excel
-                </Button>
-                <Button 
-                  className="w-full justify-start" 
-                  variant="outline"
-                  disabled
-                  title="Binnenkort beschikbaar"
-                >
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  Maandrapport
-                </Button>
                 <Link to="/add-vehicle">
                   <Button className="w-full justify-start" variant="outline">
                     <Plus className="h-4 w-4 mr-2" />

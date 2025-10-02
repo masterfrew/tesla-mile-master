@@ -22,9 +22,6 @@ const TeslaCallback: React.FC = () => {
           throw new Error('Geen autorisatiecode ontvangen');
         }
 
-        if (state !== storedState) {
-          throw new Error('Ongeldige OAuth state');
-        }
 
         if (!user) {
           throw new Error('Niet ingelogd');
@@ -34,7 +31,7 @@ const TeslaCallback: React.FC = () => {
 
         // Exchange code for tokens
         const { data: authData, error: authError } = await supabase.functions.invoke('tesla-auth', {
-          body: { code },
+          body: { code, state },
         });
 
         if (authError) throw authError;
