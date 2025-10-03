@@ -58,16 +58,21 @@ const TeslaCallback: React.FC = () => {
         const storedState = sessionStorage.getItem('tesla_oauth_state');
 
         console.log('[TeslaCallback] Code:', code ? code.substring(0, 20) + '...' : code);
-        console.log('[TeslaCallback] State:', state);
+        console.log('[TeslaCallback] State from URL:', state);
         console.log('[TeslaCallback] State type:', typeof state);
+        console.log('[TeslaCallback] State is null?:', state === null);
         console.log('[TeslaCallback] Stored state:', storedState);
 
         if (!code) {
+          console.error('[TeslaCallback] Missing code!');
           throw new Error('Geen autorisatiecode ontvangen');
         }
 
+        // Tesla should return state - if it doesn't, something is wrong
         if (!state) {
-          throw new Error('Geen state parameter ontvangen');
+          console.error('[TeslaCallback] Missing state parameter from Tesla!');
+          console.error('[TeslaCallback] Check if Tesla Developer Console has correct redirect URI');
+          throw new Error('Geen state parameter ontvangen van Tesla. Controleer de redirect URI in Tesla Developer Console.');
         }
 
         if (!user) {
