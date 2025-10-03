@@ -49,11 +49,17 @@ const TeslaCallback: React.FC = () => {
   useEffect(() => {
     const handleCallback = async () => {
       try {
+        // Log complete URL and all parameters
+        console.log('[TeslaCallback] Full URL:', window.location.href);
+        console.log('[TeslaCallback] All URL params:', Object.fromEntries(searchParams.entries()));
+        
         const code = searchParams.get('code');
         const state = searchParams.get('state');
         const storedState = sessionStorage.getItem('tesla_oauth_state');
 
-        console.log('[TeslaCallback] Received state:', state);
+        console.log('[TeslaCallback] Code:', code ? code.substring(0, 20) + '...' : code);
+        console.log('[TeslaCallback] State:', state);
+        console.log('[TeslaCallback] State type:', typeof state);
         console.log('[TeslaCallback] Stored state:', storedState);
 
         if (!code) {
