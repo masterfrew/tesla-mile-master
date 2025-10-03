@@ -123,9 +123,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('[tesla-start] FATAL_ERROR:', error.message);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[tesla-start] FATAL_ERROR:', errorMessage);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       { 
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
