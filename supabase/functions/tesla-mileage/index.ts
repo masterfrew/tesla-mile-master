@@ -67,6 +67,8 @@ serve(async (req) => {
     }
 
     console.log(`Syncing mileage for ${vehicles.length} vehicles`);
+    const teslaApiBaseUrl = Deno.env.get('TESLA_FLEET_API_BASE_URL')
+      || 'https://fleet-api.prd.eu.vn.cloud.tesla.com';
     let synced = 0;
 
     // Fetch and store mileage for each vehicle
@@ -74,7 +76,7 @@ serve(async (req) => {
       try {
         // Fetch vehicle data from Tesla API
         const vehicleDataResponse = await fetch(
-          `https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data`,
+          `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data`,
           {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
@@ -85,6 +87,7 @@ serve(async (req) => {
 
         if (!vehicleDataResponse.ok) {
           console.error(`Failed to fetch data for vehicle ${vehicle.tesla_vehicle_id}`);
+          console.error('Tesla API base URL used:', teslaApiBaseUrl);
           continue;
         }
 
