@@ -18,6 +18,16 @@ const TeslaCallback: React.FC = () => {
         const state = searchParams.get('state');
         const storedState = sessionStorage.getItem('tesla_oauth_state');
 
+        if (!state || !storedState || state !== storedState) {
+          toast({
+            title: "Ongeldige state-parameter",
+            description: 'De OAuth-terugkoppeling kon niet worden gevalideerd. Probeer het opnieuw.',
+            variant: "destructive",
+          });
+          navigate('/');
+          return;
+        }
+
         if (!code) {
           throw new Error('Geen autorisatiecode ontvangen');
         }
