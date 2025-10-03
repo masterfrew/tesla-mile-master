@@ -4,12 +4,47 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import {
+  FunctionsFetchError,
+  FunctionsHttpError,
+  FunctionsRelayError,
+} from '@supabase/supabase-js';
 
 const TeslaCallback: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [status, setStatus] = useState('Verwerken...');
+
+  const getFunctionErrorMessage = async (error: unknown): Promise<string> => {
+    if (error instanceof FunctionsHttpError) {
+      try {
+        const errorBody = await error.context.json();
+        if (errorBody?.error && typeof errorBody.error === 'string') {
+          return errorBody.error;
+        }
+      } catch (parseError) {
+        console.error('Failed to parse FunctionsHttpError context:', parseError);
+      }
+      return error.message || 'Onbekende fout';
+    }
+
+    if (error instanceof FunctionsFetchError || error instanceof FunctionsRelayError) {
+      if (error.context && typeof error.context === 'object' && 'error' in error.context) {
+        const contextError = (error.context as { error?: unknown }).error;
+        if (typeof contextError === 'string') {
+          return contextError;
+        }
+      }
+      return error.message || 'Onbekende fout';
+    }
+
+    if (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') {
+      return (error as { message: string }).message;
+    }
+
+    return 'Onbekende fout';
+  };
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -34,7 +69,9 @@ const TeslaCallback: React.FC = () => {
           body: { code, state },
         });
 
-        if (authError) throw authError;
+        if (authError) {
+          throw new Error(await getFunctionErrorMessage(authError));
+        }
         if (authData?.error) throw new Error(authData.error);
 
         setStatus('Voertuigen ophalen...');
@@ -44,6 +81,7 @@ const TeslaCallback: React.FC = () => {
 
         if (vehiclesError) {
           console.error('Failed to fetch vehicles:', vehiclesError);
+          throw new Error(await getFunctionErrorMessage(vehiclesError));
         }
 
         setStatus('Kilometerstand synchroniseren...');
@@ -53,6 +91,7 @@ const TeslaCallback: React.FC = () => {
 
         if (mileageError) {
           console.error('Failed to sync mileage:', mileageError);
+          throw new Error(await getFunctionErrorMessage(mileageError));
         }
 
         // Clean up
@@ -68,9 +107,10 @@ const TeslaCallback: React.FC = () => {
 
       } catch (error) {
         console.error('Tesla callback error:', error);
+        const errorMessage = await getFunctionErrorMessage(error);
         toast({
           title: "Fout bij verbinden",
-          description: error instanceof Error ? error.message : 'Onbekende fout',
+          description: errorMessage,
           variant: "destructive",
         });
         navigate('/');
