@@ -48,8 +48,11 @@ serve(async (req) => {
 
     console.log('Fetching vehicles from Tesla API...');
 
+    const teslaApiBaseUrl = Deno.env.get('TESLA_FLEET_API_BASE_URL')
+      || 'https://fleet-api.prd.eu.vn.cloud.tesla.com';
+
     // Fetch vehicles from Tesla API
-    const vehiclesResponse = await fetch('https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/vehicles', {
+    const vehiclesResponse = await fetch(`${teslaApiBaseUrl}/api/1/vehicles`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -59,6 +62,7 @@ serve(async (req) => {
     if (!vehiclesResponse.ok) {
       const errorText = await vehiclesResponse.text();
       console.error('Tesla API error:', errorText);
+      console.error('Tesla API base URL used:', teslaApiBaseUrl);
       throw new Error(`Failed to fetch vehicles: ${errorText}`);
     }
 

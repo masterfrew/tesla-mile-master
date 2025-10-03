@@ -35,6 +35,7 @@ This implementation provides a secure Tesla OAuth2 flow with PKCE (Proof Key for
 ### Required Secrets in Supabase (Already Set)
 - ✅ `TESLA_CLIENT_ID`
 - ✅ `TESLA_CLIENT_SECRET`
+- ✅ `TESLA_FLEET_API_BASE_URL` *(use `https://fleet-api.prd.eu.vn.cloud.tesla.com` for EU accounts, `https://fleet-api.prd.na.vn.cloud.tesla.com` for North America)*
 - ✅ `SUPABASE_URL`
 - ✅ `SUPABASE_SERVICE_ROLE_KEY`
 
@@ -156,6 +157,10 @@ User redirected to dashboard
 ### Issue: "requested path is invalid"
 - **Cause**: Site URL not configured in Supabase
 - **Fix**: Set Site URL in Supabase Dashboard → Authentication → URL Configuration
+
+### Issue: Edge Function returns non-2xx status
+- **Cause**: Tesla Fleet API region mismatch
+- **Fix**: Set `TESLA_FLEET_API_BASE_URL` in Supabase → Project Settings → Configuration → Functions. Use the EU endpoint for European Tesla accounts.
 
 ### Issue: User not redirected after success
 - **Cause**: TeslaCallback component not handling success
