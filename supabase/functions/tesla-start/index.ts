@@ -89,12 +89,6 @@ serve(async (req) => {
 
     console.log('[tesla-start] PKCE state stored successfully');
 
-    // Clean up old states (non-blocking)
-    const cleanupResult = await supabase.rpc('cleanup_expired_pkce_states');
-    if (cleanupResult.error) {
-      console.warn('[tesla-start] WARN: cleanup_failed', cleanupResult.error);
-    }
-
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     if (!clientId) {
       console.error('[tesla-start] ERROR: tesla_client_id_not_configured');
