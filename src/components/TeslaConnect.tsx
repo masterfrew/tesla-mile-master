@@ -50,14 +50,24 @@ const TeslaConnect: React.FC = () => {
       
       const { data, error } = await supabase.functions.invoke('tesla-start');
 
-      if (error) throw error;
-
-      if (!data?.authUrl || !data?.state) {
-        throw new Error('Invalid response from server');
+      if (error) {
+        console.error('[TeslaConnect] Error from tesla-start:', error);
+        throw error;
       }
 
+      if (!data?.authUrl || !data?.state) {
+        console.error('[TeslaConnect] Invalid response:', data);
+        throw new Error('Ongeldige respons van server');
+      }
+
+      console.log('[TeslaConnect] Storing state:', data.state);
+      
       // Store state for verification
       sessionStorage.setItem('tesla_oauth_state', data.state);
+      
+      // Verify storage
+      const storedState = sessionStorage.getItem('tesla_oauth_state');
+      console.log('[TeslaConnect] Verified stored state:', storedState);
       
       // Redirect to Tesla OAuth with PKCE
       window.location.href = data.authUrl;

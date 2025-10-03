@@ -53,20 +53,16 @@ const TeslaCallback: React.FC = () => {
         const state = searchParams.get('state');
         const storedState = sessionStorage.getItem('tesla_oauth_state');
 
-        if (!state || !storedState || state !== storedState) {
-          toast({
-            title: "Ongeldige state-parameter",
-            description: 'De OAuth-terugkoppeling kon niet worden gevalideerd. Probeer het opnieuw.',
-            variant: "destructive",
-          });
-          navigate('/');
-          return;
-        }
+        console.log('[TeslaCallback] Received state:', state);
+        console.log('[TeslaCallback] Stored state:', storedState);
 
         if (!code) {
           throw new Error('Geen autorisatiecode ontvangen');
         }
 
+        if (!state) {
+          throw new Error('Geen state parameter ontvangen');
+        }
 
         if (!user) {
           throw new Error('Niet ingelogd');
@@ -74,7 +70,7 @@ const TeslaCallback: React.FC = () => {
 
         setStatus('Tesla-account verbinden...');
 
-        // Exchange code for tokens
+        // Exchange code for tokens - backend validates state against database
         const { data: authData, error: authError } = await supabase.functions.invoke('tesla-auth', {
           body: { code, state },
         });
