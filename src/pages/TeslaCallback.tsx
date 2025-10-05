@@ -50,18 +50,22 @@ const TeslaCallback: React.FC = () => {
     const handleCallback = async () => {
       try {
         // Log complete URL and all parameters
+        console.log('[TeslaCallback] ========== CALLBACK START ==========');
         console.log('[TeslaCallback] Full URL:', window.location.href);
         console.log('[TeslaCallback] All URL params:', Object.fromEntries(searchParams.entries()));
+        console.log('[TeslaCallback] Number of URL params:', searchParams.toString().split('&').length);
         
         const code = searchParams.get('code');
         const state = searchParams.get('state');
         const storedState = sessionStorage.getItem('tesla_oauth_state');
 
-        console.log('[TeslaCallback] Code:', code ? code.substring(0, 20) + '...' : code);
-        console.log('[TeslaCallback] State from URL:', state);
-        console.log('[TeslaCallback] State type:', typeof state);
-        console.log('[TeslaCallback] State is null?:', state === null);
-        console.log('[TeslaCallback] Stored state:', storedState);
+        console.log('[TeslaCallback] Extracted values:');
+        console.log('  - Code:', code ? `${code.substring(0, 20)}... (length: ${code.length})` : 'NULL');
+        console.log('  - State from URL:', state ? `${state.substring(0, 20)}... (length: ${state.length})` : 'NULL');
+        console.log('  - State type:', typeof state);
+        console.log('  - State is null?:', state === null);
+        console.log('  - Stored state:', storedState ? `${storedState.substring(0, 20)}... (length: ${storedState.length})` : 'NULL');
+        console.log('[TeslaCallback] ====================================');
 
         if (!code) {
           console.error('[TeslaCallback] Missing code!');

@@ -37,6 +37,10 @@ const TeslaConnect: React.FC = () => {
 
   const handleConnect = async () => {
     try {
+      console.log('[TeslaConnect] Starting connection process...');
+      console.log('[TeslaConnect] User:', user?.id);
+      console.log('[TeslaConnect] Is connected:', isConnected);
+      
       setIsLoading(true);
       
       if (isConnected) {
@@ -48,7 +52,11 @@ const TeslaConnect: React.FC = () => {
         return;
       }
       
+      console.log('[TeslaConnect] Invoking tesla-start...');
+      
       const { data, error } = await supabase.functions.invoke('tesla-start');
+
+      console.log('[TeslaConnect] Response from tesla-start:', { data, error });
 
       if (error) {
         console.error('[TeslaConnect] Error from tesla-start:', error);
@@ -56,23 +64,26 @@ const TeslaConnect: React.FC = () => {
       }
 
       if (!data?.authUrl || !data?.state) {
-        console.error('[TeslaConnect] Invalid response:', data);
+        console.error('[TeslaConnect] Invalid response - missing authUrl or state:', data);
         throw new Error('Ongeldige respons van server');
       }
 
-      console.log('[TeslaConnect] Storing state:', data.state);
+      console.log('[TeslaConnect] Auth URL received:', data.authUrl);
+      console.log('[TeslaConnect] State to store:', data.state.substring(0, 10) + '...');
       
       // Store state for verification
       sessionStorage.setItem('tesla_oauth_state', data.state);
       
       // Verify storage
       const storedState = sessionStorage.getItem('tesla_oauth_state');
-      console.log('[TeslaConnect] Verified stored state:', storedState);
+      console.log('[TeslaConnect] Verified stored state matches:', storedState === data.state);
+      
+      console.log('[TeslaConnect] Redirecting to Tesla...');
       
       // Redirect to Tesla OAuth with PKCE
       window.location.href = data.authUrl;
     } catch (error) {
-      console.error('Error initiating Tesla connection:', error);
+      console.error('[TeslaConnect] Error initiating Tesla connection:', error);
       toast.error('Fout bij verbinden met Tesla. Probeer het later opnieuw.');
       setIsLoading(false);
     }
