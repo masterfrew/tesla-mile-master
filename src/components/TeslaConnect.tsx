@@ -11,7 +11,14 @@ const TeslaConnect: React.FC = () => {
   const [lastSync, setLastSync] = useState<string | null>(null);
   const { user } = useAuth();
 
+  // Debug: Log when component mounts
   useEffect(() => {
+    console.log('[TeslaConnect] Component mounted!');
+    console.log('[TeslaConnect] User at mount:', user?.id);
+  }, []);
+
+  useEffect(() => {
+    console.log('[TeslaConnect] Checking connection for user:', user?.id);
     checkConnection();
   }, [user]);
 
@@ -89,10 +96,15 @@ const TeslaConnect: React.FC = () => {
     }
   };
 
+  console.log('[TeslaConnect] Component rendering. IsLoading:', isLoading, 'IsConnected:', isConnected);
+
   return (
     <Button 
       size="lg" 
-      onClick={handleConnect} 
+      onClick={() => {
+        console.log('[TeslaConnect] Button clicked!');
+        handleConnect();
+      }}
       className={isConnected ? "bg-success hover:bg-success/90" : "bg-accent hover:bg-accent/90"}
       disabled={isLoading}
     >
