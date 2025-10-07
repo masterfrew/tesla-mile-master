@@ -36,15 +36,19 @@ serve(async (req) => {
 
     console.log('Getting vehicles and access token for user:', user.id);
 
-    // Get access token from vault
-    const { data: accessToken, error: tokenError } = await supabase.rpc('get_tesla_access_token', {
-      p_user_id: user.id,
-    });
+    // Get access token from profiles table
+    const { data: profile, error: tokenError } = await supabase
+      .from('profiles')
+      .select('tesla_access_token')
+      .eq('user_id', user.id)
+      .single();
 
-    if (tokenError || !accessToken) {
+    if (tokenError || !profile?.tesla_access_token) {
       console.error('Failed to get access token:', tokenError);
       throw new Error('No Tesla access token found');
     }
+
+    const accessToken = profile.tesla_access_token;
 
     // Get user's vehicles
     const { data: vehicles, error: vehiclesError } = await supabase
