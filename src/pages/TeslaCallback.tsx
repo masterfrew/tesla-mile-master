@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -15,6 +15,7 @@ const TeslaCallback: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [status, setStatus] = useState('Verwerken...');
+  const hasProcessed = useRef(false);
 
   const getFunctionErrorMessage = async (error: unknown): Promise<string> => {
     if (error instanceof FunctionsHttpError) {
@@ -48,6 +49,13 @@ const TeslaCallback: React.FC = () => {
 
   useEffect(() => {
     const handleCallback = async () => {
+      // Prevent multiple executions
+      if (hasProcessed.current) {
+        console.log('[TeslaCallback] Already processed, skipping');
+        return;
+      }
+      hasProcessed.current = true;
+
       try {
         // Log complete URL and all parameters
         console.log('[TeslaCallback] ========== CALLBACK START ==========');
