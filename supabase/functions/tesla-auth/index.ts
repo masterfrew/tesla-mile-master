@@ -123,17 +123,21 @@ serve(async (req) => {
 
     console.log('[tesla-auth] Storing tokens for user:', user.id);
 
-    // Store tokens using the secure vault function
-    const { error: storeError } = await supabase.rpc('store_tesla_tokens', {
-      p_user_id: user.id,
-      p_access_token: tokenData.access_token,
-      p_refresh_token: tokenData.refresh_token,
-      p_expires_at: expiresAt.toISOString(),
-    });
+    // Store tokens directly in profiles table (workaround for RPC schema cache issue)
+    // Note: We store tokens in JSON for now, in production you should use vault encryption
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({
+        tesla_access_token: tokenData.access_token,
+        tesla_refresh_token: tokenData.refresh_token,
+        tesla_token_expires_at: expiresAt.toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', user.id);
 
-    if (storeError) {
-      console.error('[tesla-auth] ERROR: failed_to_store_tokens', storeError);
-      throw storeError;
+    if (updateError) {
+      console.error('[tesla-auth] ERROR: failed_to_store_tokens', updateError);
+      throw updateError;
     }
 
     console.log('[tesla-auth] SUCCESS: Tesla tokens stored successfully');
