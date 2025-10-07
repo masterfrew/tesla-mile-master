@@ -55,14 +55,41 @@ Deno.serve(async (req) => {
     // Register the partner account for the Europe region
     const registerUrl = `${teslaApiBase}/api/1/partner_accounts`;
     
+    // First get an access token for the registration
+    const tokenUrl = 'https://auth.tesla.com/oauth2/v3/token';
+    const tokenResponse = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope: 'openid vehicle_device_data vehicle_cmds vehicle_charging_cmds',
+        audience: teslaApiBase,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const tokenError = await tokenResponse.text();
+      console.error('[tesla-register] Token error:', tokenError);
+      throw new Error(`Failed to get access token: ${tokenError}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+
+    console.log('[tesla-register] Got access token, registering account...');
+    
     const registerResponse = await fetch(registerUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${btoa(`${clientId}:${clientSecret}`)}`
+        'Authorization': `Bearer ${accessToken}`
       },
       body: JSON.stringify({
-        domain: 'kmtrack.nl'
+        domain: 'kmtrack.lovable.app'
       })
     });
 

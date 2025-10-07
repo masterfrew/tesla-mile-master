@@ -252,6 +252,9 @@ const Dashboard: React.FC = () => {
               </div>
 
               <div className="space-y-3">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Stap 1: Registreer uw Tesla Developer account voor de Europe regio
+                </p>
                 <Button 
                   onClick={handleRegisterTeslaAccount} 
                   disabled={isRegistering || isRegistered}
@@ -266,15 +269,18 @@ const Dashboard: React.FC = () => {
                   ) : isRegistered ? (
                     <>
                       <Shield className="h-4 w-4 mr-2" />
-                      Account geregistreerd
+                      ✓ Account geregistreerd
                     </>
                   ) : (
                     <>
                       <Shield className="h-4 w-4 mr-2" />
-                      Registreer Tesla Account
+                      1. Registreer Tesla Account
                     </>
                   )}
                 </Button>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Stap 2: Verbind uw Tesla en synchroniseer gegevens
+                </p>
                 <TeslaConnect />
               </div>
             </div>
@@ -357,10 +363,12 @@ const Dashboard: React.FC = () => {
                           VIN: {vehicle.vin.slice(-6)}
                         </p>
                       </div>
-                      <Button variant="outline" size="sm">
-                        <MapPin className="h-4 w-4 mr-2" />
-                        Details
-                      </Button>
+                      <Link to="/trips">
+                        <Button variant="outline" size="sm">
+                          <MapPin className="h-4 w-4 mr-2" />
+                          Bekijk ritten
+                        </Button>
+                      </Link>
                     </div>
                   ))}
                 </div>
@@ -374,16 +382,16 @@ const Dashboard: React.FC = () => {
               </CardHeader>
               <CardContent className="space-y-3">
                 <TeslaConnect />
-                <Link to="/trips">
+                <Link to="/trips" className="block">
+                  <Button className="w-full justify-start" variant="outline">
+                    <Download className="h-4 w-4 mr-2" />
+                    Rithistorie & Export
+                  </Button>
+                </Link>
+                <Link to="/trips" className="block">
                   <Button className="w-full justify-start" variant="outline">
                     <Plus className="h-4 w-4 mr-2" />
                     Nieuwe rit toevoegen
-                  </Button>
-                </Link>
-                <Link to="/add-vehicle">
-                  <Button className="w-full justify-start" variant="outline">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Voertuig toevoegen
                   </Button>
                 </Link>
               </CardContent>
