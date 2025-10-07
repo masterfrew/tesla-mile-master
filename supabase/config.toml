@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.tesla-mileage]
 verify_jwt = true
+
+[functions.tesla-register]
+verify_jwt = true

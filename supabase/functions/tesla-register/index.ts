@@ -1,0 +1,114 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    console.log('[tesla-register] Starting Tesla account registration for Europe region');
+
+    // Get the authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+
+    // Create Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
+
+    // Verify the user
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      console.error('[tesla-register] Auth error:', authError);
+      throw new Error('Unauthorized');
+    }
+
+    console.log('[tesla-register] User authenticated:', user.id);
+
+    // Get Tesla credentials
+    const clientId = Deno.env.get('TESLA_CLIENT_ID');
+    const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
+    const teslaApiBase = Deno.env.get('TESLA_FLEET_API_BASE_URL') || 'https://fleet-api.prd.eu.vn.cloud.tesla.com';
+
+    if (!clientId || !clientSecret) {
+      throw new Error('Tesla credentials not configured');
+    }
+
+    console.log('[tesla-register] Registering account for Europe region:', teslaApiBase);
+
+    // Register the partner account for the Europe region
+    const registerUrl = `${teslaApiBase}/api/1/partner_accounts`;
+    
+    const registerResponse = await fetch(registerUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${btoa(`${clientId}:${clientSecret}`)}`
+      },
+      body: JSON.stringify({
+        domain: 'kmtrack.nl'
+      })
+    });
+
+    const registerData = await registerResponse.json();
+
+    if (!registerResponse.ok) {
+      console.error('[tesla-register] Registration failed:', registerData);
+      
+      // Check if already registered
+      if (registerData.error && registerData.error.includes('already registered')) {
+        console.log('[tesla-register] Account already registered');
+        return new Response(
+          JSON.stringify({ 
+            success: true,
+            message: 'Account is already registered for Europe region',
+            alreadyRegistered: true
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      throw new Error(`Registration failed: ${JSON.stringify(registerData)}`);
+    }
+
+    console.log('[tesla-register] SUCCESS: Account registered for Europe region');
+
+    return new Response(
+      JSON.stringify({ 
+        success: true,
+        message: 'Tesla account successfully registered for Europe region',
+        data: registerData
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('[tesla-register] Error:', error.message);
+    return new Response(
+      JSON.stringify({ 
+        error: error.message,
+        success: false
+      }),
+      { 
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
+    );
+  }
+});

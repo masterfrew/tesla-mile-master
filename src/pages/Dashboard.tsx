@@ -49,6 +49,8 @@ const Dashboard: React.FC = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
   const [loading, setLoading] = useState(true);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isRegistered, setIsRegistered] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -135,6 +137,36 @@ const Dashboard: React.FC = () => {
     await signOut();
   };
 
+  const handleRegisterTeslaAccount = async () => {
+    setIsRegistering(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('tesla-register', {
+        method: 'POST'
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        setIsRegistered(true);
+        toast({
+          title: "Succesvol geregistreerd",
+          description: data.alreadyRegistered 
+            ? "Uw Tesla account is al geregistreerd voor de Europe regio."
+            : "Uw Tesla account is nu geregistreerd voor de Europe regio. U kunt nu uw Tesla verbinden.",
+        });
+      }
+    } catch (error) {
+      console.error('Error registering Tesla account:', error);
+      toast({
+        title: "Registratie mislukt",
+        description: "Kon Tesla account niet registreren. Probeer het opnieuw.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -219,7 +251,32 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <TeslaConnect />
+              <div className="space-y-3">
+                <Button 
+                  onClick={handleRegisterTeslaAccount} 
+                  disabled={isRegistering || isRegistered}
+                  className="w-full"
+                  variant={isRegistered ? "outline" : "default"}
+                >
+                  {isRegistering ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Registreren...
+                    </>
+                  ) : isRegistered ? (
+                    <>
+                      <Shield className="h-4 w-4 mr-2" />
+                      Account geregistreerd
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="h-4 w-4 mr-2" />
+                      Registreer Tesla Account
+                    </>
+                  )}
+                </Button>
+                <TeslaConnect />
+              </div>
             </div>
           </div>
         ) : (
