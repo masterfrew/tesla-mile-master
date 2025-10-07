@@ -71,14 +71,6 @@ serve(async (req) => {
 
     const codeVerifier = pkceData.code_verifier;
 
-    // Delete used state immediately
-    await supabase
-      .from('oauth_pkce_state')
-      .delete()
-      .eq('nonce', state);
-
-    console.log('[tesla-auth] Used PKCE state deleted');
-
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
     const redirectUri = 'https://kmtrack.nl/oauth2callback';
@@ -141,6 +133,14 @@ serve(async (req) => {
     }
 
     console.log('[tesla-auth] SUCCESS: Tesla tokens stored successfully');
+
+    // Delete used state only after successful token storage
+    await supabase
+      .from('oauth_pkce_state')
+      .delete()
+      .eq('nonce', state);
+
+    console.log('[tesla-auth] Used PKCE state deleted');
 
     return new Response(
       JSON.stringify({ 
