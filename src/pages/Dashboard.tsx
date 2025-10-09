@@ -16,7 +16,8 @@ import {
   Zap,
   MapPin,
   BarChart3,
-  Shield
+  Shield,
+  Loader2
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import TeslaConnect from '@/components/TeslaConnect';
@@ -251,37 +252,69 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground mb-4">
-                  Stap 1: Registreer uw Tesla Developer account voor de Europe regio
-                </p>
-                <Button 
-                  onClick={handleRegisterTeslaAccount} 
-                  disabled={isRegistering || isRegistered}
-                  className="w-full"
-                  variant={isRegistered ? "outline" : "default"}
-                >
-                  {isRegistering ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Registreren...
-                    </>
-                  ) : isRegistered ? (
-                    <>
-                      <Shield className="h-4 w-4 mr-2" />
-                      ✓ Account geregistreerd
-                    </>
-                  ) : (
-                    <>
-                      <Shield className="h-4 w-4 mr-2" />
-                      1. Registreer Tesla Account
-                    </>
-                  )}
-                </Button>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Stap 2: Verbind uw Tesla en synchroniseer gegevens
-                </p>
-                <TeslaConnect />
+              <div className="space-y-6">
+                {/* Step 1: Registration */}
+                <div className={`p-4 rounded-lg border-2 ${isRegistered ? 'border-green-500 bg-green-50 dark:bg-green-950' : 'border-yellow-500 bg-yellow-50 dark:bg-yellow-950'}`}>
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className={`flex items-center justify-center w-8 h-8 rounded-full ${isRegistered ? 'bg-green-500' : 'bg-yellow-500'} text-white font-bold`}>
+                      {isRegistered ? '✓' : '1'}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold mb-1 text-foreground">
+                        {isRegistered ? 'Account Geregistreerd ✓' : 'Registreer Tesla Developer Account'}
+                      </h3>
+                      <p className="text-sm text-foreground/80">
+                        {isRegistered 
+                          ? 'Uw Tesla Developer account is succesvol geregistreerd voor de Europe regio.'
+                          : 'Eerste stap: registreer uw Tesla Developer account voor de Europe regio. Dit hoeft maar één keer.'}
+                      </p>
+                    </div>
+                  </div>
+                  <Button 
+                    onClick={handleRegisterTeslaAccount} 
+                    disabled={isRegistering || isRegistered}
+                    className="w-full"
+                    variant={isRegistered ? "outline" : "default"}
+                    size="lg"
+                  >
+                    {isRegistering ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Bezig met registreren...
+                      </>
+                    ) : isRegistered ? (
+                      <>
+                        <Shield className="h-4 w-4 mr-2" />
+                        Registratie voltooid
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="h-4 w-4 mr-2" />
+                        Klik hier om te registreren
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {/* Step 2: Connection - Only enabled when registered */}
+                <div className={`p-4 rounded-lg border-2 ${!isRegistered ? 'border-gray-300 bg-gray-50 dark:bg-gray-900 opacity-60' : 'border-blue-500 bg-blue-50 dark:bg-blue-950'}`}>
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className={`flex items-center justify-center w-8 h-8 rounded-full ${isRegistered ? 'bg-blue-500' : 'bg-gray-400'} text-white font-bold`}>
+                      2
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold mb-1 text-foreground">Verbind uw Tesla Account</h3>
+                      <p className="text-sm text-foreground/80">
+                        {!isRegistered 
+                          ? '⚠️ Voltooi eerst stap 1 voordat u uw Tesla kunt verbinden.'
+                          : 'Nu kunt u uw Tesla account verbinden en uw voertuiggegevens synchroniseren.'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className={!isRegistered ? 'pointer-events-none' : ''}>
+                    <TeslaConnect />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
