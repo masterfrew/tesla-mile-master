@@ -44,61 +44,59 @@ const TeslaConnect: React.FC = () => {
 
   const handleConnect = async () => {
     try {
-      console.log('[TeslaConnect] Starting connection process...');
-      console.log('[TeslaConnect] User:', user?.id);
-      console.log('[TeslaConnect] Is connected:', isConnected);
+      console.log('[TeslaConnect v2] Starting connection process...');
+      console.log('[TeslaConnect v2] User:', user?.id);
+      console.log('[TeslaConnect v2] Is connected:', isConnected);
       
       setIsLoading(true);
       
-      // ALWAYS register first (will return "already registered" if already done)
-      // This ensures the account is properly registered before any API calls
-      console.log('[TeslaConnect] Step 1: Ensuring Tesla account is registered for Europe region...');
+      // CRITICAL: We have tokens but account might not be registered for Europe region
+      // This is causing the "must be registered" error
+      // Solution: Clear tokens and force re-authentication to ensure registration
+      
+      console.log('[TeslaConnect v2] Clearing old tokens to force re-registration...');
+      
+      // Clear the stored tokens
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ 
+          tesla_access_token: null,
+          tesla_refresh_token: null,
+          tesla_token_expires_at: null 
+        })
+        .eq('user_id', user?.id);
+      
+      if (updateError) {
+        console.error('[TeslaConnect v2] Error clearing tokens:', updateError);
+      }
+      
+      // Now register the account for Europe region
+      console.log('[TeslaConnect v2] Step 1: Registering Tesla account for Europe region...');
+      toast.info('Tesla account wordt geregistreerd voor Europa...');
       
       const { data: registerData, error: registerError } = await supabase.functions.invoke('tesla-register');
 
-      console.log('[TeslaConnect] Registration response:', { registerData, registerError });
+      console.log('[TeslaConnect v2] Registration response:', { registerData, registerError });
 
       if (registerError) {
-        console.error('[TeslaConnect] Registration error:', registerError);
+        console.error('[TeslaConnect v2] Registration error:', registerError);
         toast.error('Fout bij registreren Tesla account. Probeer het opnieuw.');
         setIsLoading(false);
         return;
       }
 
       if (!registerData?.success) {
-        console.error('[TeslaConnect] Registration failed:', registerData);
+        console.error('[TeslaConnect v2] Registration failed:', registerData);
         toast.error('Tesla account registratie mislukt. Probeer het opnieuw.');
         setIsLoading(false);
         return;
       }
 
-      console.log('[TeslaConnect] Registration successful:', registerData.alreadyRegistered ? 'Already registered' : 'Newly registered');
+      console.log('[TeslaConnect v2] Registration successful!');
+      toast.success('Account geregistreerd! Start autorisatie...');
       
-      if (isConnected) {
-        // Account is registered and we have tokens, just re-sync
-        toast.info('Account geregistreerd, gegevens worden gesynchroniseerd...');
-        
-        const { error: vehiclesError } = await supabase.functions.invoke('tesla-vehicles');
-        if (vehiclesError) {
-          console.error('[TeslaConnect] Vehicles sync error:', vehiclesError);
-          toast.error('Fout bij ophalen voertuigen');
-          setIsLoading(false);
-          return;
-        }
-        
-        const { error: mileageError } = await supabase.functions.invoke('tesla-mileage');
-        if (mileageError) {
-          console.error('[TeslaConnect] Mileage sync error:', mileageError);
-        }
-        
-        toast.success('Gegevens gesynchroniseerd!');
-        setIsLoading(false);
-        return;
-      }
-      
-      // Step 2: Start OAuth flow to get user authorization
-      console.log('[TeslaConnect] Step 2: Starting OAuth flow...');
-      toast.info('Starten OAuth autorisatie...');
+      // Step 2: Start fresh OAuth flow
+      console.log('[TeslaConnect v2] Step 2: Starting OAuth flow...');
       
       const { data, error } = await supabase.functions.invoke('tesla-start');
 
