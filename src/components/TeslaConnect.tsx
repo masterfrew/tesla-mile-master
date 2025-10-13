@@ -59,7 +59,30 @@ const TeslaConnect: React.FC = () => {
         return;
       }
       
-      console.log('[TeslaConnect] Invoking tesla-start...');
+      // Step 1: First ensure Tesla account is registered for Europe region
+      console.log('[TeslaConnect] Step 1: Registering Tesla account for Europe region...');
+      toast.info('Tesla account wordt geregistreerd...');
+      
+      const { data: registerData, error: registerError } = await supabase.functions.invoke('tesla-register', {
+        method: 'POST'
+      });
+
+      if (registerError) {
+        console.error('[TeslaConnect] Registration error:', registerError);
+        toast.error('Fout bij registreren Tesla account. Probeer het opnieuw.');
+        setIsLoading(false);
+        return;
+      }
+
+      if (registerData?.success) {
+        console.log('[TeslaConnect] Registration successful:', registerData.alreadyRegistered ? 'Already registered' : 'Newly registered');
+        toast.success(registerData.alreadyRegistered 
+          ? 'Tesla account al geregistreerd' 
+          : 'Tesla account succesvol geregistreerd!');
+      }
+      
+      // Step 2: Now start OAuth flow
+      console.log('[TeslaConnect] Step 2: Starting OAuth flow...');
       
       const { data, error } = await supabase.functions.invoke('tesla-start');
 

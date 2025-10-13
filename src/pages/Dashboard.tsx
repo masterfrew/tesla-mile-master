@@ -50,8 +50,6 @@ const Dashboard: React.FC = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
   const [loading, setLoading] = useState(true);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [isRegistered, setIsRegistered] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -138,36 +136,6 @@ const Dashboard: React.FC = () => {
     await signOut();
   };
 
-  const handleRegisterTeslaAccount = async () => {
-    setIsRegistering(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('tesla-register', {
-        method: 'POST'
-      });
-
-      if (error) throw error;
-
-      if (data?.success) {
-        setIsRegistered(true);
-        toast({
-          title: "Succesvol geregistreerd",
-          description: data.alreadyRegistered 
-            ? "Uw Tesla account is al geregistreerd voor de Europe regio."
-            : "Uw Tesla account is nu geregistreerd voor de Europe regio. U kunt nu uw Tesla verbinden.",
-        });
-      }
-    } catch (error) {
-      console.error('Error registering Tesla account:', error);
-      toast({
-        title: "Registratie mislukt",
-        description: "Kon Tesla account niet registreren. Probeer het opnieuw.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsRegistering(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -252,68 +220,18 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-6">
-                {/* Step 1: Registration */}
-                <div className={`p-4 rounded-lg border-2 ${isRegistered ? 'border-green-500 bg-green-50 dark:bg-green-950' : 'border-yellow-500 bg-yellow-50 dark:bg-yellow-950'}`}>
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className={`flex items-center justify-center w-8 h-8 rounded-full ${isRegistered ? 'bg-green-500' : 'bg-yellow-500'} text-white font-bold`}>
-                      {isRegistered ? '✓' : '1'}
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold mb-1 text-foreground">
-                        {isRegistered ? 'Account Geregistreerd ✓' : 'Registreer Tesla Developer Account'}
-                      </h3>
-                      <p className="text-sm text-foreground/80">
-                        {isRegistered 
-                          ? 'Uw Tesla Developer account is succesvol geregistreerd voor de Europe regio.'
-                          : 'Eerste stap: registreer uw Tesla Developer account voor de Europe regio. Dit hoeft maar één keer.'}
-                      </p>
-                    </div>
+              <div className="space-y-4">
+                <div className="p-4 rounded-lg border-2 border-primary bg-primary/5">
+                  <div className="mb-3">
+                    <h3 className="font-semibold mb-2 text-foreground flex items-center gap-2">
+                      <Zap className="h-5 w-5 text-primary" />
+                      Eenvoudig in één klik verbinden
+                    </h3>
+                    <p className="text-sm text-foreground/80">
+                      Klik op de knop hieronder om uw Tesla account te verbinden. We registreren automatisch uw account en starten de veilige OAuth flow.
+                    </p>
                   </div>
-                  <Button 
-                    onClick={handleRegisterTeslaAccount} 
-                    disabled={isRegistering || isRegistered}
-                    className="w-full"
-                    variant={isRegistered ? "outline" : "default"}
-                    size="lg"
-                  >
-                    {isRegistering ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Bezig met registreren...
-                      </>
-                    ) : isRegistered ? (
-                      <>
-                        <Shield className="h-4 w-4 mr-2" />
-                        Registratie voltooid
-                      </>
-                    ) : (
-                      <>
-                        <Shield className="h-4 w-4 mr-2" />
-                        Klik hier om te registreren
-                      </>
-                    )}
-                  </Button>
-                </div>
-
-                {/* Step 2: Connection - Only enabled when registered */}
-                <div className={`p-4 rounded-lg border-2 ${!isRegistered ? 'border-gray-300 bg-gray-50 dark:bg-gray-900 opacity-60' : 'border-blue-500 bg-blue-50 dark:bg-blue-950'}`}>
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className={`flex items-center justify-center w-8 h-8 rounded-full ${isRegistered ? 'bg-blue-500' : 'bg-gray-400'} text-white font-bold`}>
-                      2
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold mb-1 text-foreground">Verbind uw Tesla Account</h3>
-                      <p className="text-sm text-foreground/80">
-                        {!isRegistered 
-                          ? '⚠️ Voltooi eerst stap 1 voordat u uw Tesla kunt verbinden.'
-                          : 'Nu kunt u uw Tesla account verbinden en uw voertuiggegevens synchroniseren.'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className={!isRegistered ? 'pointer-events-none' : ''}>
-                    <TeslaConnect />
-                  </div>
+                  <TeslaConnect />
                 </div>
               </div>
             </div>
