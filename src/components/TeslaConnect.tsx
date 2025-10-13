@@ -50,22 +50,13 @@ const TeslaConnect: React.FC = () => {
       
       setIsLoading(true);
       
-      if (isConnected) {
-        // Trigger re-sync
-        await supabase.functions.invoke('tesla-vehicles');
-        await supabase.functions.invoke('tesla-mileage');
-        toast.success('Gegevens gesynchroniseerd!');
-        setIsLoading(false);
-        return;
-      }
+      // ALWAYS register first (will return "already registered" if already done)
+      // This ensures the account is properly registered before any API calls
+      console.log('[TeslaConnect] Step 1: Ensuring Tesla account is registered for Europe region...');
       
-      // Step 1: First ensure Tesla account is registered for Europe region
-      console.log('[TeslaConnect] Step 1: Registering Tesla account for Europe region...');
-      toast.info('Tesla account wordt geregistreerd...');
-      
-      const { data: registerData, error: registerError } = await supabase.functions.invoke('tesla-register', {
-        method: 'POST'
-      });
+      const { data: registerData, error: registerError } = await supabase.functions.invoke('tesla-register');
+
+      console.log('[TeslaConnect] Registration response:', { registerData, registerError });
 
       if (registerError) {
         console.error('[TeslaConnect] Registration error:', registerError);
@@ -74,15 +65,40 @@ const TeslaConnect: React.FC = () => {
         return;
       }
 
-      if (registerData?.success) {
-        console.log('[TeslaConnect] Registration successful:', registerData.alreadyRegistered ? 'Already registered' : 'Newly registered');
-        toast.success(registerData.alreadyRegistered 
-          ? 'Tesla account al geregistreerd' 
-          : 'Tesla account succesvol geregistreerd!');
+      if (!registerData?.success) {
+        console.error('[TeslaConnect] Registration failed:', registerData);
+        toast.error('Tesla account registratie mislukt. Probeer het opnieuw.');
+        setIsLoading(false);
+        return;
+      }
+
+      console.log('[TeslaConnect] Registration successful:', registerData.alreadyRegistered ? 'Already registered' : 'Newly registered');
+      
+      if (isConnected) {
+        // Account is registered and we have tokens, just re-sync
+        toast.info('Account geregistreerd, gegevens worden gesynchroniseerd...');
+        
+        const { error: vehiclesError } = await supabase.functions.invoke('tesla-vehicles');
+        if (vehiclesError) {
+          console.error('[TeslaConnect] Vehicles sync error:', vehiclesError);
+          toast.error('Fout bij ophalen voertuigen');
+          setIsLoading(false);
+          return;
+        }
+        
+        const { error: mileageError } = await supabase.functions.invoke('tesla-mileage');
+        if (mileageError) {
+          console.error('[TeslaConnect] Mileage sync error:', mileageError);
+        }
+        
+        toast.success('Gegevens gesynchroniseerd!');
+        setIsLoading(false);
+        return;
       }
       
-      // Step 2: Now start OAuth flow
+      // Step 2: Start OAuth flow to get user authorization
       console.log('[TeslaConnect] Step 2: Starting OAuth flow...');
+      toast.info('Starten OAuth autorisatie...');
       
       const { data, error } = await supabase.functions.invoke('tesla-start');
 
