@@ -2,13 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
-import {
-  FunctionsFetchError,
-  FunctionsHttpError,
-  FunctionsRelayError,
-} from '@supabase/supabase-js';
 
 const TeslaCallback: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -17,131 +12,104 @@ const TeslaCallback: React.FC = () => {
   const [status, setStatus] = useState('Verwerken...');
   const hasProcessed = useRef(false);
 
-  const getFunctionErrorMessage = async (error: unknown): Promise<string> => {
-    if (error instanceof FunctionsHttpError) {
-      try {
-        const errorBody = await error.context.json();
-        if (errorBody?.error && typeof errorBody.error === 'string') {
-          return errorBody.error;
-        }
-      } catch (parseError) {
-        console.error('Failed to parse FunctionsHttpError context:', parseError);
-      }
-      return error.message || 'Onbekende fout';
-    }
-
-    if (error instanceof FunctionsFetchError || error instanceof FunctionsRelayError) {
-      if (error.context && typeof error.context === 'object' && 'error' in error.context) {
-        const contextError = (error.context as { error?: unknown }).error;
-        if (typeof contextError === 'string') {
-          return contextError;
-        }
-      }
-      return error.message || 'Onbekende fout';
-    }
-
-    if (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') {
-      return (error as { message: string }).message;
-    }
-
-    return 'Onbekende fout';
-  };
 
   useEffect(() => {
     const handleCallback = async () => {
-      // Prevent multiple executions
-      if (hasProcessed.current) {
-        console.log('[TeslaCallback] Already processed, skipping');
-        return;
-      }
+      if (hasProcessed.current) return;
       hasProcessed.current = true;
 
       try {
-        // Log complete URL and all parameters
-        console.log('[TeslaCallback] ========== CALLBACK START ==========');
-        console.log('[TeslaCallback] Full URL:', window.location.href);
-        console.log('[TeslaCallback] All URL params:', Object.fromEntries(searchParams.entries()));
-        console.log('[TeslaCallback] Number of URL params:', searchParams.toString().split('&').length);
-        
         const code = searchParams.get('code');
         const state = searchParams.get('state');
-        const storedState = sessionStorage.getItem('tesla_oauth_state');
 
-        console.log('[TeslaCallback] Extracted values:');
-        console.log('  - Code:', code ? `${code.substring(0, 20)}... (length: ${code.length})` : 'NULL');
-        console.log('  - State from URL:', state ? `${state.substring(0, 20)}... (length: ${state.length})` : 'NULL');
-        console.log('  - State type:', typeof state);
-        console.log('  - State is null?:', state === null);
-        console.log('  - Stored state:', storedState ? `${storedState.substring(0, 20)}... (length: ${storedState.length})` : 'NULL');
-        console.log('[TeslaCallback] ====================================');
+        console.log('[TeslaCallback] Processing callback with code and state');
 
-        if (!code) {
-          console.error('[TeslaCallback] Missing code!');
-          throw new Error('Geen autorisatiecode ontvangen');
-        }
-
-        // Tesla should return state - if it doesn't, something is wrong
-        if (!state) {
-          console.error('[TeslaCallback] Missing state parameter from Tesla!');
-          console.error('[TeslaCallback] Check if Tesla Developer Console has correct redirect URI');
-          throw new Error('Geen state parameter ontvangen van Tesla. Controleer de redirect URI in Tesla Developer Console.');
+        if (!code || !state) {
+          toast.error('Ongeldige callback parameters');
+          navigate('/');
+          return;
         }
 
         if (!user) {
-          throw new Error('Niet ingelogd');
+          toast.error('Je moet ingelogd zijn');
+          navigate('/auth');
+          return;
         }
 
-        setStatus('Tesla-account verbinden...');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          toast.error('Geen actieve sessie');
+          navigate('/auth');
+          return;
+        }
 
-        // Exchange code for tokens - backend validates state against database
-        const { data: authData, error: authError } = await supabase.functions.invoke('tesla-auth', {
+        setStatus('Tokens uitwisselen...');
+
+        // Exchange code for tokens
+        const { error: authError } = await supabase.functions.invoke('tesla-auth', {
           body: { code, state },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
         });
 
         if (authError) {
-          throw new Error(await getFunctionErrorMessage(authError));
+          console.error('[TeslaCallback] Auth error:', authError);
+          toast.error('Kon tokens niet uitwisselen');
+          navigate('/');
+          return;
         }
-        if (authData?.error) throw new Error(authData.error);
+
+        setStatus('Account registreren...');
+
+        // Register for Europe region
+        const { error: registerError } = await supabase.functions.invoke('tesla-register', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (registerError) {
+          console.error('[TeslaCallback] Register warning (continuing):', registerError);
+        }
 
         setStatus('Voertuigen ophalen...');
 
         // Fetch vehicles
-        const { data: vehiclesData, error: vehiclesError } = await supabase.functions.invoke('tesla-vehicles');
+        const { error: vehiclesError } = await supabase.functions.invoke('tesla-vehicles', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
 
         if (vehiclesError) {
-          console.error('Failed to fetch vehicles:', vehiclesError);
-          throw new Error(await getFunctionErrorMessage(vehiclesError));
+          console.error('[TeslaCallback] Vehicles error:', vehiclesError);
+          toast.error('Kon voertuigen niet ophalen');
+          navigate('/');
+          return;
         }
 
         setStatus('Kilometerstand synchroniseren...');
 
-        // Fetch mileage data
-        const { data: mileageData, error: mileageError } = await supabase.functions.invoke('tesla-mileage');
-
-        if (mileageError) {
-          console.error('Failed to sync mileage:', mileageError);
-          throw new Error(await getFunctionErrorMessage(mileageError));
-        }
-
-        // Clean up
-        sessionStorage.removeItem('tesla_oauth_state');
-
-        toast({
-          title: "Succesvol verbonden!",
-          description: `${vehiclesData?.vehicles_count || 0} voertuig(en) geïmporteerd.`,
+        // Sync mileage
+        const { error: mileageError } = await supabase.functions.invoke('tesla-mileage', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
         });
 
-        // Redirect to dashboard
+        if (mileageError) {
+          console.error('[TeslaCallback] Mileage error:', mileageError);
+          toast.warning('Voertuigen toegevoegd, maar kilometerstand kon niet worden gesynchroniseerd');
+        } else {
+          toast.success('Tesla succesvol verbonden en data gesynchroniseerd!');
+        }
+
         navigate('/');
 
       } catch (error) {
-        console.error('Tesla callback error:', error);
-        const errorMessage = await getFunctionErrorMessage(error);
-        toast({
-          title: "Fout bij verbinden",
-          description: errorMessage,
-          variant: "destructive",
-        });
+        console.error('[TeslaCallback] Error:', error);
+        toast.error('Er ging iets mis bij het verwerken van de Tesla verbinding');
         navigate('/');
       }
     };
