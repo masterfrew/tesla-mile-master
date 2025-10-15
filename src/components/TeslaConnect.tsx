@@ -1,168 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Zap, Loader2, CheckCircle } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
-import { toast } from 'sonner';
+// src/components/TeslaConnectButton.tsx
+import React, { useState } from "react"
 
-const TeslaConnect: React.FC = () => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  const { user } = useAuth();
+export default function TeslaConnectButton() {
+  const [busy, setBusy] = useState(false)
 
-  // Debug: Log when component mounts
-  useEffect(() => {
-    console.log('[TeslaConnect] Component mounted!');
-    console.log('[TeslaConnect] User at mount:', user?.id);
-  }, []);
-
-  useEffect(() => {
-    console.log('[TeslaConnect] Checking connection for user:', user?.id);
-    checkConnection();
-  }, [user]);
-
-  const checkConnection = async () => {
-    if (!user) return;
-    
+  async function go() {
+    setBusy(true)
     try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('tesla_token_expires_at')
-        .eq('user_id', user.id)
-        .single();
-      
-      if (data?.tesla_token_expires_at) {
-        const expiresAt = new Date(data.tesla_token_expires_at);
-        setIsConnected(expiresAt > new Date());
-        setLastSync(data.tesla_token_expires_at);
-      }
-    } catch (error) {
-      console.error('Error checking connection:', error);
+      const res = await fetch("/functions/v1/tesla-oauth/authorize")
+      if (!res.ok) throw new Error("authorize-failed")
+      const payload = await res.json()
+      const url = payload.url as string
+      if (!url) throw new Error("no-url")
+      window.location.href = url
+    } catch (e) {
+      console.error("connect-error", e)
+      setBusy(false)
+      // client should surface an error; component stays minimal
     }
-  };
-
-  const handleConnect = async () => {
-    try {
-      console.log('[TeslaConnect v2] Starting connection process...');
-      console.log('[TeslaConnect v2] User:', user?.id);
-      console.log('[TeslaConnect v2] Is connected:', isConnected);
-      
-      setIsLoading(true);
-      
-      // CRITICAL: We have tokens but account might not be registered for Europe region
-      // This is causing the "must be registered" error
-      // Solution: Clear tokens and force re-authentication to ensure registration
-      
-      console.log('[TeslaConnect v2] Clearing old tokens to force re-registration...');
-      
-      // Clear the stored tokens
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ 
-          tesla_access_token: null,
-          tesla_refresh_token: null,
-          tesla_token_expires_at: null 
-        })
-        .eq('user_id', user?.id);
-      
-      if (updateError) {
-        console.error('[TeslaConnect v2] Error clearing tokens:', updateError);
-      }
-      
-      // Now register the account for Europe region
-      console.log('[TeslaConnect v2] Step 1: Registering Tesla account for Europe region...');
-      toast.info('Tesla account wordt geregistreerd voor Europa...');
-      
-      const { data: registerData, error: registerError } = await supabase.functions.invoke('tesla-register');
-
-      console.log('[TeslaConnect v2] Registration response:', { registerData, registerError });
-
-      if (registerError) {
-        console.error('[TeslaConnect v2] Registration error:', registerError);
-        toast.error('Fout bij registreren Tesla account. Probeer het opnieuw.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (!registerData?.success) {
-        console.error('[TeslaConnect v2] Registration failed:', registerData);
-        toast.error('Tesla account registratie mislukt. Probeer het opnieuw.');
-        setIsLoading(false);
-        return;
-      }
-
-      console.log('[TeslaConnect v2] Registration successful!');
-      toast.success('Account geregistreerd! Start autorisatie...');
-      
-      // Step 2: Start fresh OAuth flow
-      console.log('[TeslaConnect v2] Step 2: Starting OAuth flow...');
-      
-      const { data, error } = await supabase.functions.invoke('tesla-start');
-
-      console.log('[TeslaConnect] Response from tesla-start:', { data, error });
-
-      if (error) {
-        console.error('[TeslaConnect] Error from tesla-start:', error);
-        throw error;
-      }
-
-      if (!data?.authUrl || !data?.state) {
-        console.error('[TeslaConnect] Invalid response - missing authUrl or state:', data);
-        throw new Error('Ongeldige respons van server');
-      }
-
-      console.log('[TeslaConnect] Auth URL received:', data.authUrl);
-      console.log('[TeslaConnect] State to store:', data.state.substring(0, 10) + '...');
-      
-      // Store state for verification
-      sessionStorage.setItem('tesla_oauth_state', data.state);
-      
-      // Verify storage
-      const storedState = sessionStorage.getItem('tesla_oauth_state');
-      console.log('[TeslaConnect] Verified stored state matches:', storedState === data.state);
-      
-      console.log('[TeslaConnect] Redirecting to Tesla...');
-      
-      // Redirect to Tesla OAuth with PKCE
-      window.location.href = data.authUrl;
-    } catch (error) {
-      console.error('[TeslaConnect] Error initiating Tesla connection:', error);
-      toast.error('Fout bij verbinden met Tesla. Probeer het later opnieuw.');
-      setIsLoading(false);
-    }
-  };
-
-  console.log('[TeslaConnect] Component rendering. IsLoading:', isLoading, 'IsConnected:', isConnected);
+  }
 
   return (
-    <Button 
-      size="lg" 
-      onClick={() => {
-        console.log('[TeslaConnect] Button clicked!');
-        handleConnect();
-      }}
-      className={isConnected ? "bg-success hover:bg-success/90" : "bg-accent hover:bg-accent/90"}
-      disabled={isLoading}
+    <button
+      onClick={go}
+      disabled={busy}
+      className="px-3 py-2 rounded-xl border"
+      aria-busy={busy}
     >
-      {isLoading ? (
-        <>
-          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          {isConnected ? 'Synchroniseren...' : 'Verbinden...'}
-        </>
-      ) : isConnected ? (
-        <>
-          <CheckCircle className="h-4 w-4 mr-2" />
-          Synchroniseer Tesla
-        </>
-      ) : (
-        <>
-          <Zap className="h-4 w-4 mr-2" />
-          Verbind met Tesla
-        </>
-      )}
-    </Button>
-  );
-};
-
-export default TeslaConnect;
+      {busy ? "Redirecting..." : "Connect your Tesla"}
+    </button>
+  )
+}
