@@ -15,8 +15,12 @@ const TeslaCallback: React.FC = () => {
 
   useEffect(() => {
     const handleCallback = async () => {
-      if (hasProcessed.current) return;
+      if (hasProcessed.current) {
+        console.log('[TeslaCallback] Already processed, skipping');
+        return;
+      }
       hasProcessed.current = true;
+      console.log('[TeslaCallback] Processing callback (hasProcessed set to true)');
 
       try {
         const code = searchParams.get('code');

@@ -97,11 +97,18 @@ serve(async (req) => {
     // Store tokens using the secure function
     const expiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
     
+    console.log('[tesla-auth] Storing tokens with params:', {
+      user_id: user.id,
+      has_access_token: !!tokens.access_token,
+      has_refresh_token: !!tokens.refresh_token,
+      expires_at: expiresAt
+    });
+
     const { error: storeError } = await supabase.rpc('store_tesla_tokens', {
       p_user_id: user.id,
       p_access_token: tokens.access_token,
       p_refresh_token: tokens.refresh_token,
-      p_expires_at: expiresAt,
+      p_expires_at: expiresAt
     });
 
     if (storeError) {
