@@ -95,7 +95,11 @@ serve(async (req) => {
       throw new Error('Tesla Client ID not configured');
     }
 
-    const redirectUri = 'https://kmtrack.nl/oauth2callback';
+    // Get the origin from the request to build the redirect URI dynamically
+    const origin = req.headers.get('origin') || req.headers.get('referer')?.split('/').slice(0, 3).join('/') || 'https://kmtrack.nl';
+    const redirectUri = `${origin}/oauth2callback`;
+    
+    console.log('[tesla-start] Using redirect URI:', redirectUri);
     
     // Build authorization URL
     const authUrl = new URL('https://auth.tesla.com/oauth2/v3/authorize');

@@ -63,6 +63,12 @@ serve(async (req) => {
       throw new Error('Tesla credentials not configured');
     }
 
+    // Get the origin from the request to build the redirect URI dynamically
+    const origin = req.headers.get('origin') || req.headers.get('referer')?.split('/').slice(0, 3).join('/') || 'https://kmtrack.nl';
+    const redirectUri = `${origin}/oauth2callback`;
+    
+    console.log('[tesla-auth] Using redirect URI:', redirectUri);
+
     // Exchange code for tokens
     const tokenResponse = await fetch('https://auth.tesla.com/oauth2/v3/token', {
       method: 'POST',
@@ -75,7 +81,7 @@ serve(async (req) => {
         client_secret: clientSecret,
         code: code,
         code_verifier: pkceData.code_verifier,
-        redirect_uri: 'https://kmtrack.nl/oauth2callback',
+        redirect_uri: redirectUri,
       }),
     });
 
