@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -6,35 +6,40 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
 const TeslaCallback: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [status, setStatus] = useState('Verwerken...');
-  const hasProcessed = useRef(false);
-
 
   useEffect(() => {
     const handleCallback = async () => {
-      if (hasProcessed.current) {
+      // Check if we already processed this callback
+      const processedKey = 'tesla_callback_processed';
+      if (localStorage.getItem(processedKey)) {
         console.log('[TeslaCallback] Already processed, skipping');
+        navigate('/');
         return;
       }
-      hasProcessed.current = true;
-      console.log('[TeslaCallback] Processing callback (hasProcessed set to true)');
 
       try {
         const code = searchParams.get('code');
         const state = searchParams.get('state');
 
+        // Mark as processed immediately and remove from URL
+        localStorage.setItem(processedKey, 'true');
+        setSearchParams({});
+
         console.log('[TeslaCallback] Processing callback with code and state');
 
         if (!code || !state) {
+          localStorage.removeItem(processedKey);
           toast.error('Ongeldige callback parameters');
           navigate('/');
           return;
         }
 
         if (!user) {
+          localStorage.removeItem(processedKey);
           toast.error('Je moet ingelogd zijn');
           navigate('/auth');
           return;
@@ -42,6 +47,7 @@ const TeslaCallback: React.FC = () => {
 
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
+          localStorage.removeItem(processedKey);
           toast.error('Geen actieve sessie');
           navigate('/auth');
           return;
@@ -59,6 +65,7 @@ const TeslaCallback: React.FC = () => {
 
         if (authError) {
           console.error('[TeslaCallback] Auth error:', authError);
+          localStorage.removeItem(processedKey);
           toast.error('Kon tokens niet uitwisselen');
           navigate('/');
           return;
@@ -88,6 +95,7 @@ const TeslaCallback: React.FC = () => {
 
         if (vehiclesError) {
           console.error('[TeslaCallback] Vehicles error:', vehiclesError);
+          localStorage.removeItem(processedKey);
           toast.error('Kon voertuigen niet ophalen');
           navigate('/');
           return;
@@ -109,10 +117,13 @@ const TeslaCallback: React.FC = () => {
           toast.success('Tesla succesvol verbonden en data gesynchroniseerd!');
         }
 
+        // Clear the processed flag on success
+        localStorage.removeItem(processedKey);
         navigate('/');
 
       } catch (error) {
         console.error('[TeslaCallback] Error:', error);
+        localStorage.removeItem(processedKey);
         toast.error('Er ging iets mis bij het verwerken van de Tesla verbinding');
         navigate('/');
       }
