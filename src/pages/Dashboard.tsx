@@ -4,8 +4,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Link } from 'react-router-dom';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   Car, 
   Plus, 
@@ -17,9 +24,12 @@ import {
   MapPin,
   BarChart3,
   Shield,
-  Loader2
+  Loader2,
+  LogOut,
+  User,
+  RefreshCw
 } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import TeslaConnect from '@/components/TeslaConnect';
 
 interface Profile {
@@ -50,6 +60,7 @@ const Dashboard: React.FC = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -74,11 +85,7 @@ const Dashboard: React.FC = () => {
       setProfile(data);
     } catch (error) {
       console.error('Error fetching profile:', error);
-      toast({
-        title: "Fout bij laden profiel",
-        description: "Kon profiel niet laden.",
-        variant: "destructive",
-      });
+      toast.error('Kon profiel niet laden');
     }
   };
 
@@ -136,6 +143,42 @@ const Dashboard: React.FC = () => {
     await signOut();
   };
 
+  const handleSync = async () => {
+    try {
+      setSyncing(true);
+      toast.info('Tesla data synchroniseren...');
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Geen actieve sessie');
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('tesla-mileage', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (error) {
+        console.error('Sync error:', error);
+        toast.error('Kon niet synchroniseren met Tesla');
+        return;
+      }
+
+      toast.success(`${data?.synced || 0} voertuig(en) gesynchroniseerd!`);
+      
+      // Refresh data
+      await fetchVehicles();
+      await fetchMileageStats();
+    } catch (error) {
+      console.error('Sync exception:', error);
+      toast.error('Er ging iets mis bij het synchroniseren');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -168,9 +211,30 @@ const Dashboard: React.FC = () => {
               <Badge variant={profile?.subscription_tier === 'premium' ? 'default' : 'secondary'}>
                 {profile?.subscription_tier === 'premium' ? 'Premium' : 'Basis'}
               </Badge>
-              <Button variant="ghost" size="icon" onClick={handleSignOut}>
-                <Settings className="h-4 w-4" />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuLabel>Mijn Account</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem disabled>
+                    <User className="h-4 w-4 mr-2" />
+                    Profiel bewerken
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleSync} disabled={syncing}>
+                    <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                    {syncing ? 'Synchroniseren...' : 'Tesla synchroniseren'}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut}>
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Uitloggen
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -332,7 +396,15 @@ const Dashboard: React.FC = () => {
                 <CardTitle>Snelle acties</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <TeslaConnect />
+                <Button 
+                  className="w-full justify-start" 
+                  variant="outline"
+                  onClick={handleSync}
+                  disabled={syncing}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                  {syncing ? 'Synchroniseren...' : 'Kilometerstand synchroniseren'}
+                </Button>
                 <Link to="/trips" className="block">
                   <Button className="w-full justify-start" variant="outline">
                     <Download className="h-4 w-4 mr-2" />
