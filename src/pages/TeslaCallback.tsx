@@ -10,15 +10,23 @@ const TeslaCallback: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [status, setStatus] = useState('Verwerken...');
-  const processingRef = useRef(false);
+  const hasProcessed = useRef(false);
 
   useEffect(() => {
     const handleCallback = async () => {
-      // Prevent multiple concurrent executions
-      if (processingRef.current) {
+      const code = searchParams.get('code');
+      const state = searchParams.get('state');
+
+      // Prevent multiple executions - check if already processed
+      if (hasProcessed.current || !code || !state || !user) {
+        if (!code || !state) {
+          toast.error('Ongeldige callback parameters');
+          navigate('/');
+        }
         return;
       }
-      processingRef.current = true;
+      
+      hasProcessed.current = true;
 
       try {
         const code = searchParams.get('code');
