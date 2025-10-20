@@ -10,9 +10,17 @@ interface TeslaConnectProps {
 
 export default function TeslaConnect({ onConnected }: TeslaConnectProps) {
   const [loading, setLoading] = useState(false);
+  const connectingRef = React.useRef(false);
 
   const handleConnect = async () => {
+    // Prevent duplicate clicks
+    if (connectingRef.current || loading) {
+      console.log('[TeslaConnect] Already connecting, ignoring duplicate click');
+      return;
+    }
+
     try {
+      connectingRef.current = true;
       setLoading(true);
       console.log('[TeslaConnect] Starting Tesla OAuth flow');
 
@@ -49,7 +57,7 @@ export default function TeslaConnect({ onConnected }: TeslaConnectProps) {
     } catch (error) {
       console.error('[TeslaConnect] Exception:', error);
       toast.error('Er ging iets mis bij het verbinden met Tesla');
-    } finally {
+      connectingRef.current = false;
       setLoading(false);
     }
   };

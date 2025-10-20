@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
         'Authorization': `Bearer ${accessToken}`
       },
       body: JSON.stringify({
-        domain: 'kmtrack.lovable.app'
+        domain: 'kmtrack.nl'
       })
     });
 

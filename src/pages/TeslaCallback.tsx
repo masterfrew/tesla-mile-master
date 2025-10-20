@@ -33,18 +33,25 @@ const TeslaCallback: React.FC = () => {
         return;
       }
 
-      // Check sessionStorage to prevent duplicate processing
-      const storageKey = `tesla_oauth_processed_${state}`;
-      const alreadyProcessed = sessionStorage.getItem(storageKey);
+      // CRITICAL: Check and set sessionStorage ATOMICALLY to prevent race conditions
+      const storageKey = `tesla_oauth_${state}`;
+      const processingKey = `tesla_oauth_processing_${state}`;
       
-      if (alreadyProcessed) {
-        console.log('[TeslaCallback] Already processed this OAuth flow, skipping');
+      // Check if already completed
+      if (sessionStorage.getItem(storageKey) === 'completed') {
+        console.log('[TeslaCallback] Already completed this OAuth flow, redirecting');
         navigate('/');
         return;
       }
 
-      // Mark as processing immediately
-      sessionStorage.setItem(storageKey, 'true');
+      // Check if currently processing
+      if (sessionStorage.getItem(processingKey) === 'true') {
+        console.log('[TeslaCallback] Already processing this OAuth flow, skipping');
+        return;
+      }
+
+      // Mark as processing IMMEDIATELY
+      sessionStorage.setItem(processingKey, 'true');
       console.log('[TeslaCallback] Marked as processing');
 
       try {
@@ -126,13 +133,18 @@ const TeslaCallback: React.FC = () => {
           toast.success('Tesla succesvol verbonden en data gesynchroniseerd!');
         }
 
-        // Clean up sessionStorage after successful completion
-        sessionStorage.removeItem(storageKey);
+        // Mark as completed
+        sessionStorage.setItem(storageKey, 'completed');
+        sessionStorage.removeItem(processingKey);
         navigate('/');
 
       } catch (error) {
         console.error('[TeslaCallback] Exception:', error);
-        sessionStorage.removeItem(storageKey);
+        // Clean up processing flag on error
+        const state = searchParams.get('state');
+        if (state) {
+          sessionStorage.removeItem(`tesla_oauth_processing_${state}`);
+        }
         toast.error('Er ging iets mis bij het verwerken van de Tesla verbinding');
         navigate('/');
       }
