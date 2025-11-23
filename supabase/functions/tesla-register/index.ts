@@ -57,6 +57,9 @@ Deno.serve(async (req) => {
     
     // First get an access token for the registration
     const tokenUrl = 'https://auth.tesla.com/oauth2/v3/token';
+    
+    console.log('[tesla-register] Requesting client credentials token...');
+    
     const tokenResponse = await fetch(tokenUrl, {
       method: 'POST',
       headers: {
@@ -80,7 +83,8 @@ Deno.serve(async (req) => {
     const tokenData = await tokenResponse.json();
     const accessToken = tokenData.access_token;
 
-    console.log('[tesla-register] Got access token, registering account...');
+    console.log('[tesla-register] Got access token, calling register API...');
+    console.log('[tesla-register] Register URL:', registerUrl);
     
     const registerResponse = await fetch(registerUrl, {
       method: 'POST',
@@ -93,14 +97,24 @@ Deno.serve(async (req) => {
       })
     });
 
-    const registerData = await registerResponse.json();
+    // IMPORTANT: Read response first before checking status
+    const responseText = await registerResponse.text();
+    console.log('[tesla-register] Response status:', registerResponse.status);
+    console.log('[tesla-register] Response body:', responseText);
+
+    let registerData;
+    try {
+      registerData = JSON.parse(responseText);
+    } catch (e) {
+      registerData = { raw: responseText };
+    }
 
     if (!registerResponse.ok) {
       console.error('[tesla-register] Registration failed:', registerData);
       
       // Check if already registered
-      if (registerData.error && registerData.error.includes('already registered')) {
-        console.log('[tesla-register] Account already registered');
+      if (responseText.includes('already registered') || responseText.includes('Account already exists')) {
+        console.log('[tesla-register] Account already registered, continuing...');
         return new Response(
           JSON.stringify({ 
             success: true,
@@ -111,7 +125,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      throw new Error(`Registration failed: ${JSON.stringify(registerData)}`);
+      throw new Error(`Registration failed (${registerResponse.status}): ${responseText}`);
     }
 
     console.log('[tesla-register] SUCCESS: Account registered for Europe region');
