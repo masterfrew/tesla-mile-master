@@ -63,9 +63,8 @@ serve(async (req) => {
       throw new Error('Tesla credentials not configured');
     }
 
-    // Get the origin from the request to build the redirect URI dynamically
-    const origin = req.headers.get('origin') || req.headers.get('referer')?.split('/').slice(0, 3).join('/') || 'https://kmtrack.nl';
-    const redirectUri = `${origin}/oauth2callback`;
+    // Use fixed redirect URI to match Tesla Developer Console configuration
+    const redirectUri = 'https://kmtrack.nl/oauth2callback';
     
     console.log('[tesla-auth] Using redirect URI:', redirectUri);
 
