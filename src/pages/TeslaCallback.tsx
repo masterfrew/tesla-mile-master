@@ -84,18 +84,27 @@ const TeslaCallback: React.FC = () => {
         }
 
         console.log('[TeslaCallback] Tokens exchanged successfully');
-        setStatus('Account registreren...');
+        setStatus('Account registreren voor Europa regio...');
 
-        // Register for Europe region
-        const { error: registerError } = await supabase.functions.invoke('tesla-register', {
+        // CRITICAL: Register for Europe region BEFORE fetching vehicles
+        // This must succeed or vehicle fetching will fail
+        console.log('[TeslaCallback] Starting Tesla account registration for Europe');
+        const { data: registerData, error: registerError } = await supabase.functions.invoke('tesla-register', {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
         });
 
         if (registerError) {
-          console.error('[TeslaCallback] Register warning (continuing):', registerError);
+          console.error('[TeslaCallback] Registration error:', registerError);
+          toast.error('Kon account niet registreren bij Tesla. Probeer opnieuw.');
+          sessionStorage.removeItem(storageKey);
+          sessionStorage.removeItem(processingKey);
+          navigate('/');
+          return;
         }
+
+        console.log('[TeslaCallback] Registration successful:', registerData);
 
         console.log('[TeslaCallback] Fetching vehicles...');
         setStatus('Voertuigen ophalen...');
