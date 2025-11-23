@@ -201,18 +201,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      cleanup_expired_pkce_states: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
-      get_tesla_access_token: {
-        Args: { p_user_id: string }
-        Returns: string
-      }
-      get_tesla_refresh_token: {
-        Args: { p_user_id: string }
-        Returns: string
-      }
+      cleanup_expired_pkce_states: { Args: never; Returns: undefined }
+      get_tesla_access_token: { Args: { p_user_id: string }; Returns: string }
+      get_tesla_refresh_token: { Args: { p_user_id: string }; Returns: string }
       store_tesla_tokens: {
         Args: {
           p_access_token: string
