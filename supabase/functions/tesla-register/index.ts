@@ -8,7 +8,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -16,13 +15,11 @@ serve(async (req) => {
   try {
     console.log('[tesla-register] Starting Tesla account registration for Europe region');
 
-    // Get the authorization header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       throw new Error('No authorization header');
     }
 
-    // Create Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey, {
@@ -32,7 +29,6 @@ serve(async (req) => {
       }
     });
 
-    // Verify the user
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
@@ -43,7 +39,6 @@ serve(async (req) => {
 
     console.log('[tesla-register] User authenticated:', user.id);
 
-    // Get Tesla credentials
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
     const teslaApiBase = Deno.env.get('TESLA_FLEET_API_BASE_URL') || 'https://fleet-api.prd.eu.vn.cloud.tesla.com';
@@ -53,14 +48,12 @@ serve(async (req) => {
     }
 
     console.log('[tesla-register] Registering account for Europe region:', teslaApiBase);
+    console.log('[tesla-register] Client ID:', clientId.substring(0, 10) + '...');
 
-    // Register the partner account for the Europe region
-    const registerUrl = `${teslaApiBase}/api/1/partner_accounts`;
-    
-    // First get an access token for the registration
+    // Get client credentials token for registration
     const tokenUrl = 'https://auth.tesla.com/oauth2/v3/token';
     
-    console.log('[tesla-register] Requesting client credentials token...');
+    console.log('[tesla-register] Step 1: Requesting client credentials token...');
     
     const tokenResponse = await fetch(tokenUrl, {
       method: 'POST',
@@ -83,23 +76,22 @@ serve(async (req) => {
     }
 
     const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
+    console.log('[tesla-register] Step 2: Got access token, calling register API...');
 
-    console.log('[tesla-register] Got access token, calling register API...');
+    const registerUrl = `${teslaApiBase}/api/1/partner_accounts`;
     console.log('[tesla-register] Register URL:', registerUrl);
     
     const registerResponse = await fetch(registerUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
+        'Authorization': `Bearer ${tokenData.access_token}`
       },
       body: JSON.stringify({
         domain: 'kmtrack.nl'
       })
     });
 
-    // IMPORTANT: Read response first before checking status
     const responseText = await registerResponse.text();
     console.log('[tesla-register] Response status:', registerResponse.status);
     console.log('[tesla-register] Response body:', responseText);
@@ -112,16 +104,19 @@ serve(async (req) => {
     }
 
     if (!registerResponse.ok) {
-      console.error('[tesla-register] Registration failed:', registerData);
+      console.error('[tesla-register] Registration failed with status:', registerResponse.status);
       
       // Check if already registered
-      if (responseText.includes('already registered') || responseText.includes('Account already exists')) {
+      if (responseText.includes('already registered') || 
+          responseText.includes('Account already exists') ||
+          registerResponse.status === 409) {
         console.log('[tesla-register] Account already registered, continuing...');
         return new Response(
           JSON.stringify({ 
             success: true,
             message: 'Account is already registered for Europe region',
-            alreadyRegistered: true
+            alreadyRegistered: true,
+            status: registerResponse.status
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
