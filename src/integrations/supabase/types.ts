@@ -202,8 +202,15 @@ export type Database = {
     }
     Functions: {
       cleanup_expired_pkce_states: { Args: never; Returns: undefined }
+      cleanup_expired_tesla_tokens: { Args: never; Returns: undefined }
+      cleanup_old_pkce_states: { Args: never; Returns: undefined }
       get_tesla_access_token: { Args: { p_user_id: string }; Returns: string }
       get_tesla_refresh_token: { Args: { p_user_id: string }; Returns: string }
+      is_tesla_token_expired: { Args: { p_user_id: string }; Returns: boolean }
+      mark_token_refresh_needed: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
       store_tesla_tokens: {
         Args: {
           p_access_token: string
