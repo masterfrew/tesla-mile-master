@@ -17,7 +17,13 @@ serve(async (req) => {
 
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      throw new Error('No authorization header');
+      return new Response(
+        JSON.stringify({ 
+          error: 'missing_authorization',
+          message: 'Geen autorisatie header gevonden'
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -29,38 +35,100 @@ serve(async (req) => {
 
     if (userError || !user) {
       console.error('[tesla-auth] User not authenticated:', userError);
-      throw new Error('User not authenticated');
+      return new Response(
+        JSON.stringify({ 
+          error: 'not_authenticated',
+          message: 'Gebruiker niet geauthenticeerd'
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     console.log('[tesla-auth] User authenticated:', user.id);
 
     const { code, state } = await req.json();
-    if (!code || !state) {
-      throw new Error('Missing code or state');
+    
+    if (!code) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'missing_code',
+          message: 'Geen autorisatie code ontvangen van Tesla'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    console.log('[tesla-auth] Retrieving PKCE state');
+    if (!state) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'missing_state',
+          message: 'Geen state parameter ontvangen'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    // Get PKCE verifier
+    console.log('[tesla-auth] Retrieving PKCE state for state:', state.substring(0, 10) + '...');
+
+    // Get PKCE verifier and DELETE immediately to prevent duplicate processing
     const { data: pkceData, error: pkceError } = await supabase
       .from('oauth_pkce_state')
-      .select('code_verifier')
+      .select('code_verifier, created_at')
       .eq('nonce', state)
       .eq('user_id', user.id)
       .single();
 
     if (pkceError || !pkceData) {
-      console.error('[tesla-auth] Invalid state:', pkceError);
-      throw new Error('Invalid state');
+      console.error('[tesla-auth] Invalid state - not found in database:', pkceError);
+      return new Response(
+        JSON.stringify({ 
+          error: 'invalid_state',
+          message: 'Ongeldige OAuth staat. Mogelijk is deze al gebruikt of verlopen. Probeer opnieuw te verbinden.'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    console.log('[tesla-auth] PKCE state found, exchanging code for tokens');
+    // CRITICAL: Delete PKCE state IMMEDIATELY to prevent duplicate processing
+    const { error: deleteError } = await supabase
+      .from('oauth_pkce_state')
+      .delete()
+      .eq('nonce', state)
+      .eq('user_id', user.id);
+
+    if (deleteError) {
+      console.error('[tesla-auth] Failed to delete PKCE state:', deleteError);
+      // Continue anyway, token exchange is more important
+    } else {
+      console.log('[tesla-auth] PKCE state deleted to prevent duplicate processing');
+    }
+
+    // Check if PKCE state is not too old (max 1 hour)
+    const stateAge = Date.now() - new Date(pkceData.created_at).getTime();
+    if (stateAge > 60 * 60 * 1000) {
+      console.error('[tesla-auth] PKCE state too old:', stateAge / 1000, 'seconds');
+      return new Response(
+        JSON.stringify({ 
+          error: 'expired_state',
+          message: 'OAuth staat is verlopen. Probeer opnieuw te verbinden.'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('[tesla-auth] PKCE state valid, exchanging code for tokens');
 
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
     
     if (!clientId || !clientSecret) {
-      throw new Error('Tesla credentials not configured');
+      return new Response(
+        JSON.stringify({ 
+          error: 'configuration_error',
+          message: 'Tesla credentials niet geconfigureerd'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Use fixed redirect URI to match Tesla Developer Console configuration
@@ -86,22 +154,42 @@ serve(async (req) => {
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
-      console.error('[tesla-auth] Token exchange failed:', errorText);
-      throw new Error('Token exchange failed: ' + errorText);
+      console.error('[tesla-auth] Token exchange failed:', tokenResponse.status, errorText);
+      
+      let userMessage = 'Token uitwisseling mislukt';
+      if (errorText.includes('invalid_grant') || errorText.includes('invalid_code')) {
+        userMessage = 'Ongeldige autorisatie code. Mogelijk is deze al gebruikt. Probeer opnieuw te verbinden.';
+      }
+      
+      return new Response(
+        JSON.stringify({ 
+          error: 'token_exchange_failed',
+          message: userMessage,
+          details: errorText
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const tokens = await tokenResponse.json();
-    console.log('[tesla-auth] Tokens received');
+    console.log('[tesla-auth] Tokens received successfully');
+
+    // Validate tokens
+    if (!tokens.access_token || !tokens.refresh_token) {
+      console.error('[tesla-auth] Invalid tokens received - missing access or refresh token');
+      return new Response(
+        JSON.stringify({ 
+          error: 'invalid_tokens',
+          message: 'Ongeldige tokens ontvangen van Tesla'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Store tokens using the secure function
     const expiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
     
-    console.log('[tesla-auth] Storing tokens with params:', {
-      user_id: user.id,
-      has_access_token: !!tokens.access_token,
-      has_refresh_token: !!tokens.refresh_token,
-      expires_at: expiresAt
-    });
+    console.log('[tesla-auth] Storing tokens with expiry:', expiresAt);
 
     const { error: storeError } = await supabase.rpc('store_tesla_tokens', {
       p_user_id: user.id,
@@ -112,30 +200,36 @@ serve(async (req) => {
 
     if (storeError) {
       console.error('[tesla-auth] Failed to store tokens:', storeError);
-      throw new Error('Failed to store tokens');
+      return new Response(
+        JSON.stringify({ 
+          error: 'storage_failed',
+          message: 'Kon tokens niet opslaan in database'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    console.log('[tesla-auth] Tokens stored successfully');
-
-    // Clean up PKCE state
-    await supabase
-      .from('oauth_pkce_state')
-      .delete()
-      .eq('nonce', state)
-      .eq('user_id', user.id);
+    console.log('[tesla-auth] SUCCESS: Tokens stored successfully');
 
     return new Response(
-      JSON.stringify({ success: true }),
+      JSON.stringify({ 
+        success: true,
+        message: 'Tesla account succesvol verbonden'
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[tesla-auth] Error:', errorMessage);
+    console.error('[tesla-auth] FATAL_ERROR:', errorMessage);
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ 
+        error: 'server_error',
+        message: 'Er ging iets mis bij het autoriseren',
+        details: errorMessage
+      }),
       { 
-        status: 400,
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
