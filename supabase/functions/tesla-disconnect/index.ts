@@ -63,15 +63,15 @@ serve(async (req) => {
       console.error('[tesla-disconnect] Error deleting mileage readings:', mileageError);
     }
 
-    // Mark vehicles as inactive
-    console.log('[tesla-disconnect] Marking vehicles as inactive...');
+    // Delete all vehicles (not just mark inactive)
+    console.log('[tesla-disconnect] Deleting vehicles...');
     const { error: vehiclesError } = await supabaseAdmin
       .from('vehicles')
-      .update({ is_active: false })
+      .delete()
       .eq('user_id', user.id);
 
     if (vehiclesError) {
-      console.error('[tesla-disconnect] Error updating vehicles:', vehiclesError);
+      console.error('[tesla-disconnect] Error deleting vehicles:', vehiclesError);
     }
 
     // Clear Tesla tokens from profile
