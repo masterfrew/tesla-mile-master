@@ -74,6 +74,8 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [deleteVehicleId, setDeleteVehicleId] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -224,6 +226,43 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleDisconnectTesla = async () => {
+    setDisconnecting(true);
+    setShowDisconnectDialog(false);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Geen actieve sessie');
+        return;
+      }
+
+      const { error } = await supabase.functions.invoke('tesla-disconnect', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (error) {
+        console.error('Error disconnecting Tesla:', error);
+        toast.error('Kon Tesla koppeling niet verbreken');
+        return;
+      }
+
+      toast.success('Tesla koppeling verbroken');
+      
+      // Refresh data
+      await fetchProfile();
+      await fetchVehicles();
+      await fetchMileageStats();
+    } catch (error) {
+      console.error('Exception disconnecting Tesla:', error);
+      toast.error('Er ging iets mis bij het verbreken van de Tesla koppeling');
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -269,10 +308,23 @@ const Dashboard: React.FC = () => {
                     <User className="h-4 w-4 mr-2" />
                     Profiel bewerken
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleSync} disabled={syncing}>
+                  <DropdownMenuItem onClick={handleSync} disabled={syncing || vehicles.length === 0}>
                     <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
                     {syncing ? 'Synchroniseren...' : 'Tesla synchroniseren'}
                   </DropdownMenuItem>
+                  {vehicles.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem 
+                        onClick={() => setShowDisconnectDialog(true)} 
+                        disabled={disconnecting}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        {disconnecting ? 'Verbreken...' : 'Verbreek Tesla koppeling'}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut}>
                     <LogOut className="h-4 w-4 mr-2" />
@@ -500,6 +552,25 @@ const Dashboard: React.FC = () => {
             <AlertDialogCancel>Annuleren</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteVehicle} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Verwijderen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Disconnect Tesla Dialog */}
+      <AlertDialog open={showDisconnectDialog} onOpenChange={setShowDisconnectDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Tesla koppeling verbreken?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Dit verwijdert alle voertuigen, kilometerregistraties en de Tesla toegangstokens. 
+              Je kunt daarna opnieuw je Tesla account koppelen als je dat wilt.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuleren</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDisconnectTesla} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Verbreek koppeling
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

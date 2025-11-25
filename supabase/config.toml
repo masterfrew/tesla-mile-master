@@ -14,3 +14,6 @@ verify_jwt = true
 
 [functions.tesla-register]
 verify_jwt = true
+
+[functions.tesla-disconnect]
+verify_jwt = true
