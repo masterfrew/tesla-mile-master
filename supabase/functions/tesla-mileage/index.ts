@@ -13,72 +13,182 @@ serve(async (req) => {
   }
 
   try {
-    console.log('Fetching Tesla mileage data...');
+    console.log('[tesla-mileage] Fetching Tesla mileage data...');
 
     // Get user from auth header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      throw new Error('No authorization header');
+      return new Response(
+        JSON.stringify({ 
+          error: 'missing_authorization',
+          message: 'Geen autorisatie header'
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Extract JWT token
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
 
     if (userError || !user) {
-      console.error('Failed to get user:', userError);
-      throw new Error('User not authenticated');
+      console.error('[tesla-mileage] Failed to get user:', userError);
+      return new Response(
+        JSON.stringify({ 
+          error: 'not_authenticated',
+          message: 'Gebruiker niet geauthenticeerd'
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    console.log('Getting vehicles and access token for user:', user.id);
+    console.log('[tesla-mileage] Getting tokens and vehicles for user:', user.id);
 
-    // Get access token from profiles table
+    // Get tokens and check expiry
     const { data: profile, error: tokenError } = await supabase
       .from('profiles')
-      .select('tesla_access_token')
+      .select('tesla_access_token, tesla_refresh_token, tesla_token_expires_at')
       .eq('user_id', user.id)
       .single();
 
-    if (tokenError || !profile?.tesla_access_token) {
-      console.error('Failed to get access token:', tokenError);
-      throw new Error('No Tesla access token found');
+    if (tokenError || !profile) {
+      console.error('[tesla-mileage] Failed to get profile:', tokenError);
+      return new Response(
+        JSON.stringify({ 
+          error: 'no_profile',
+          message: 'Geen profiel gevonden'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    const accessToken = profile.tesla_access_token;
+    if (!profile.tesla_access_token) {
+      console.error('[tesla-mileage] No Tesla access token found');
+      return new Response(
+        JSON.stringify({ 
+          error: 'no_token',
+          message: 'Geen Tesla toegangstoken gevonden. Verbind je Tesla account opnieuw.'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check if token is expired
+    let accessToken = profile.tesla_access_token;
+    const expiresAt = profile.tesla_token_expires_at ? new Date(profile.tesla_token_expires_at) : null;
+    
+    if (expiresAt && expiresAt < new Date()) {
+      console.log('[tesla-mileage] Token expired, attempting refresh...');
+      
+      if (!profile.tesla_refresh_token) {
+        console.error('[tesla-mileage] No refresh token available');
+        return new Response(
+          JSON.stringify({ 
+            error: 'token_expired',
+            message: 'Token verlopen en geen refresh token beschikbaar. Verbind je Tesla account opnieuw.'
+          }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Refresh the token
+      const clientId = Deno.env.get('TESLA_CLIENT_ID');
+      const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
+
+      if (!clientId || !clientSecret) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'configuration_error',
+            message: 'Tesla credentials niet geconfigureerd'
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const refreshResponse = await fetch('https://auth.tesla.com/oauth2/v3/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: profile.tesla_refresh_token,
+        }),
+      });
+
+      if (!refreshResponse.ok) {
+        const errorText = await refreshResponse.text();
+        console.error('[tesla-mileage] Token refresh failed:', errorText);
+        return new Response(
+          JSON.stringify({ 
+            error: 'refresh_failed',
+            message: 'Token vernieuwen mislukt. Verbind je Tesla account opnieuw.'
+          }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const tokens = await refreshResponse.json();
+      accessToken = tokens.access_token;
+
+      // Store refreshed tokens
+      const newExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
+      await supabase.rpc('store_tesla_tokens', {
+        p_user_id: user.id,
+        p_access_token: tokens.access_token,
+        p_refresh_token: tokens.refresh_token,
+        p_expires_at: newExpiresAt
+      });
+
+      console.log('[tesla-mileage] Token refreshed successfully');
+    }
 
     // Get user's vehicles
     const { data: vehicles, error: vehiclesError } = await supabase
       .from('vehicles')
-      .select('id, tesla_vehicle_id')
+      .select('id, tesla_vehicle_id, display_name, vin')
       .eq('user_id', user.id)
       .eq('is_active', true);
 
     if (vehiclesError) {
-      console.error('Failed to get vehicles:', vehiclesError);
-      throw vehiclesError;
+      console.error('[tesla-mileage] Failed to get vehicles:', vehiclesError);
+      return new Response(
+        JSON.stringify({ 
+          error: 'no_vehicles',
+          message: 'Kon voertuigen niet ophalen uit database'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     if (!vehicles || vehicles.length === 0) {
-      console.log('No vehicles found for user');
+      console.log('[tesla-mileage] No vehicles found for user');
       return new Response(
-        JSON.stringify({ success: true, message: 'No vehicles to sync' }),
+        JSON.stringify({ 
+          success: true, 
+          message: 'Geen voertuigen om te synchroniseren',
+          synced_vehicles: 0
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Syncing mileage for ${vehicles.length} vehicles`);
+    console.log(`[tesla-mileage] Syncing mileage for ${vehicles.length} vehicles`);
+    
     const teslaApiBaseUrl = Deno.env.get('TESLA_FLEET_API_BASE_URL')
       || 'https://fleet-api.prd.eu.vn.cloud.tesla.com';
+    
     let synced = 0;
+    const errors = [];
 
-    // Fetch and store mileage for each vehicle
+    // Fetch and store mileage for each vehicle (graceful degradation - continue on error)
     for (const vehicle of vehicles) {
       try {
-        // Fetch vehicle data from Tesla API
+        console.log(`[tesla-mileage] Fetching data for vehicle ${vehicle.tesla_vehicle_id} (${vehicle.display_name || vehicle.vin})`);
+        
         const vehicleDataResponse = await fetch(
           `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data`,
           {
@@ -90,22 +200,26 @@ serve(async (req) => {
         );
 
         if (!vehicleDataResponse.ok) {
-          console.error(`Failed to fetch data for vehicle ${vehicle.tesla_vehicle_id}`);
-          console.error('Tesla API base URL used:', teslaApiBaseUrl);
-          continue;
+          const errorText = await vehicleDataResponse.text();
+          console.error(`[tesla-mileage] Failed to fetch data for vehicle ${vehicle.tesla_vehicle_id}:`, errorText);
+          errors.push(`${vehicle.display_name || vehicle.vin}: API fout (${vehicleDataResponse.status})`);
+          continue; // Continue with next vehicle
         }
 
         const vehicleData = await vehicleDataResponse.json();
         const odometerMiles = vehicleData.response?.vehicle_state?.odometer;
 
         if (!odometerMiles) {
-          console.log(`No odometer data for vehicle ${vehicle.tesla_vehicle_id}`);
+          console.log(`[tesla-mileage] No odometer data for vehicle ${vehicle.tesla_vehicle_id}`);
+          errors.push(`${vehicle.display_name || vehicle.vin}: geen kilometerstand data`);
           continue;
         }
 
         // Convert miles to kilometers
         const odometerKm = Math.round(odometerMiles * 1.60934);
         const today = new Date().toISOString().split('T')[0];
+
+        console.log(`[tesla-mileage] Vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km`);
 
         // Get previous reading to calculate daily km
         const { data: prevReading } = await supabase
@@ -132,32 +246,45 @@ serve(async (req) => {
           });
 
         if (insertError) {
-          console.error('Failed to insert mileage reading:', insertError);
+          console.error(`[tesla-mileage] Failed to insert mileage for vehicle ${vehicle.tesla_vehicle_id}:`, insertError);
+          errors.push(`${vehicle.display_name || vehicle.vin}: database fout`);
         } else {
-          console.log(`Stored mileage for vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km`);
+          console.log(`[tesla-mileage] SUCCESS: Stored mileage for vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km`);
           synced++;
         }
 
       } catch (error) {
-        console.error(`Error processing vehicle ${vehicle.tesla_vehicle_id}:`, error);
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[tesla-mileage] Error processing vehicle ${vehicle.tesla_vehicle_id}:`, errorMsg);
+        errors.push(`${vehicle.display_name || vehicle.vin}: ${errorMsg}`);
+        continue; // Continue with next vehicle
       }
     }
+
+    console.log(`[tesla-mileage] Completed: ${synced}/${vehicles.length} vehicles synced`);
 
     return new Response(
       JSON.stringify({ 
         success: true,
-        synced_vehicles: synced
+        message: `${synced} van ${vehicles.length} voertuigen gesynchroniseerd`,
+        synced_vehicles: synced,
+        total_vehicles: vehicles.length,
+        errors: errors.length > 0 ? errors : undefined
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Error in tesla-mileage:', errorMessage);
+    console.error('[tesla-mileage] FATAL_ERROR:', errorMessage);
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ 
+        error: 'server_error',
+        message: 'Er ging iets mis bij het synchroniseren',
+        details: errorMessage
+      }),
       { 
-        status: 400,
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );

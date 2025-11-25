@@ -45,7 +45,13 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       console.error('[tesla-start] ERROR: missing_authorization_header');
-      throw new Error('No authorization header');
+      return new Response(
+        JSON.stringify({ 
+          error: 'missing_authorization',
+          message: 'Geen autorisatie header gevonden. Log opnieuw in.'
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -57,10 +63,30 @@ serve(async (req) => {
 
     if (userError || !user) {
       console.error('[tesla-start] ERROR: user_not_authenticated', userError);
-      throw new Error('User not authenticated');
+      return new Response(
+        JSON.stringify({ 
+          error: 'not_authenticated',
+          message: 'Je bent niet ingelogd. Log opnieuw in.'
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     console.log('[tesla-start] User authenticated:', user.id);
+
+    // CLEANUP: Delete old PKCE states for this user (older than 1 hour)
+    const { error: cleanupError } = await supabase
+      .from('oauth_pkce_state')
+      .delete()
+      .eq('user_id', user.id)
+      .lt('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString());
+
+    if (cleanupError) {
+      console.warn('[tesla-start] Failed to cleanup old PKCE states:', cleanupError);
+      // Don't fail the request, just log it
+    } else {
+      console.log('[tesla-start] Cleaned up old PKCE states for user');
+    }
 
     // Generate PKCE parameters
     const state = generateRandomString(32);
@@ -84,7 +110,13 @@ serve(async (req) => {
 
     if (dbError) {
       console.error('[tesla-start] ERROR: failed_to_store_pkce_state', dbError);
-      throw new Error('Failed to store PKCE state: ' + dbError.message);
+      return new Response(
+        JSON.stringify({ 
+          error: 'database_error',
+          message: 'Kon OAuth staat niet opslaan. Probeer het opnieuw.'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     console.log('[tesla-start] PKCE state stored successfully');
@@ -92,7 +124,13 @@ serve(async (req) => {
     const clientId = Deno.env.get('TESLA_CLIENT_ID');
     if (!clientId) {
       console.error('[tesla-start] ERROR: tesla_client_id_not_configured');
-      throw new Error('Tesla Client ID not configured');
+      return new Response(
+        JSON.stringify({ 
+          error: 'configuration_error',
+          message: 'Tesla Client ID niet geconfigureerd. Neem contact op met support.'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Use fixed redirect URI to match Tesla Developer Console configuration
@@ -129,9 +167,13 @@ serve(async (req) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('[tesla-start] FATAL_ERROR:', errorMessage);
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ 
+        error: 'server_error',
+        message: 'Er ging iets mis bij het starten van de Tesla verbinding. Probeer het opnieuw.',
+        details: errorMessage
+      }),
       { 
-        status: 400,
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
