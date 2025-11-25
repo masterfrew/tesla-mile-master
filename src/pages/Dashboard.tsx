@@ -13,6 +13,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { 
   Car, 
   Plus, 
@@ -27,7 +37,9 @@ import {
   Loader2,
   LogOut,
   User,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  MoreVertical
 } from 'lucide-react';
 import { toast } from 'sonner';
 import TeslaConnect from '@/components/TeslaConnect';
@@ -61,6 +73,7 @@ const Dashboard: React.FC = () => {
   const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [deleteVehicleId, setDeleteVehicleId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -176,6 +189,38 @@ const Dashboard: React.FC = () => {
       toast.error('Er ging iets mis bij het synchroniseren');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleDeleteVehicle = async () => {
+    if (!deleteVehicleId) return;
+
+    try {
+      // First delete all mileage readings for this vehicle
+      const { error: mileageError } = await supabase
+        .from('mileage_readings')
+        .delete()
+        .eq('vehicle_id', deleteVehicleId);
+
+      if (mileageError) throw mileageError;
+
+      // Then delete the vehicle
+      const { error: vehicleError } = await supabase
+        .from('vehicles')
+        .delete()
+        .eq('id', deleteVehicleId);
+
+      if (vehicleError) throw vehicleError;
+
+      toast.success('Voertuig verwijderd');
+      setDeleteVehicleId(null);
+      
+      // Refresh data
+      await fetchVehicles();
+      await fetchMileageStats();
+    } catch (error) {
+      console.error('Error deleting vehicle:', error);
+      toast.error('Kon voertuig niet verwijderen');
     }
   };
 
@@ -378,12 +423,30 @@ const Dashboard: React.FC = () => {
                           VIN: {vehicle.vin.slice(-6)}
                         </p>
                       </div>
-                      <Link to="/trips">
-                        <Button variant="outline" size="sm">
-                          <MapPin className="h-4 w-4 mr-2" />
-                          Bekijk ritten
-                        </Button>
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link to="/trips">
+                          <Button variant="outline" size="sm">
+                            <MapPin className="h-4 w-4 mr-2" />
+                            Bekijk ritten
+                          </Button>
+                        </Link>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => setDeleteVehicleId(vehicle.id)}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Verwijder voertuig
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -422,6 +485,25 @@ const Dashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteVehicleId} onOpenChange={() => setDeleteVehicleId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Weet je het zeker?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Dit verwijdert het voertuig en alle bijbehorende kilometerregistraties permanent. 
+              Deze actie kan niet ongedaan worden gemaakt.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuleren</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteVehicle} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Verwijderen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
