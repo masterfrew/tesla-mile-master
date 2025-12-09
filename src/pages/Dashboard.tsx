@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAdminCheck } from '@/hooks/useAdminCheck';
+import { useOnboarding } from '@/hooks/useOnboarding';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -44,6 +45,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import TeslaConnect from '@/components/TeslaConnect';
+import OnboardingFlow from '@/components/OnboardingFlow';
 
 interface Profile {
   id: string;
@@ -70,6 +72,7 @@ interface MileageStats {
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
   const { isAdmin } = useAdminCheck();
+  const { showOnboarding, completeOnboarding, skipOnboarding } = useOnboarding();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
@@ -277,8 +280,12 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
+    <>
+      {showOnboarding && (
+        <OnboardingFlow onComplete={completeOnboarding} onSkip={skipOnboarding} />
+      )}
+      <div className="min-h-screen bg-background">
+        {/* Header */}
       <header className="bg-card border-b">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
@@ -588,7 +595,8 @@ const Dashboard: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+      </div>
+    </>
   );
 };
 
