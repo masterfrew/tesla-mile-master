@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_logs: {
+        Row: {
+          action: string
+          created_at: string
+          details: Json | null
+          entity_id: string | null
+          entity_type: string
+          id: string
+          ip_address: string | null
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          details?: Json | null
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          ip_address?: string | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          details?: Json | null
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          ip_address?: string | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       google_sheets_integrations: {
         Row: {
           created_at: string
@@ -154,6 +190,53 @@ export type Database = {
         }
         Relationships: []
       }
+      vehicle_sync_status: {
+        Row: {
+          consecutive_failures: number | null
+          created_at: string
+          id: string
+          is_offline: boolean | null
+          last_error: string | null
+          last_successful_sync: string | null
+          last_sync_attempt: string | null
+          updated_at: string
+          user_id: string
+          vehicle_id: string
+        }
+        Insert: {
+          consecutive_failures?: number | null
+          created_at?: string
+          id?: string
+          is_offline?: boolean | null
+          last_error?: string | null
+          last_successful_sync?: string | null
+          last_sync_attempt?: string | null
+          updated_at?: string
+          user_id: string
+          vehicle_id: string
+        }
+        Update: {
+          consecutive_failures?: number | null
+          created_at?: string
+          id?: string
+          is_offline?: boolean | null
+          last_error?: string | null
+          last_successful_sync?: string | null
+          last_sync_attempt?: string | null
+          updated_at?: string
+          user_id?: string
+          vehicle_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_sync_status_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: true
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vehicles: {
         Row: {
           color: string | null
@@ -207,6 +290,16 @@ export type Database = {
       get_tesla_access_token: { Args: { p_user_id: string }; Returns: string }
       get_tesla_refresh_token: { Args: { p_user_id: string }; Returns: string }
       is_tesla_token_expired: { Args: { p_user_id: string }; Returns: boolean }
+      log_audit_event: {
+        Args: {
+          p_action: string
+          p_details?: Json
+          p_entity_id?: string
+          p_entity_type: string
+          p_user_id: string
+        }
+        Returns: string
+      }
       mark_token_refresh_needed: {
         Args: { p_user_id: string }
         Returns: undefined
