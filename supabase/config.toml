@@ -17,3 +17,6 @@ verify_jwt = true
 
 [functions.tesla-disconnect]
 verify_jwt = true
+
+[functions.tesla-sync-all]
+verify_jwt = false
