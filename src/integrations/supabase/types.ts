@@ -190,6 +190,27 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
       vehicle_sync_status: {
         Row: {
           consecutive_failures: number | null
@@ -287,8 +308,39 @@ export type Database = {
       cleanup_expired_pkce_states: { Args: never; Returns: undefined }
       cleanup_expired_tesla_tokens: { Args: never; Returns: undefined }
       cleanup_old_pkce_states: { Args: never; Returns: undefined }
+      get_admin_stats: {
+        Args: never
+        Returns: {
+          active_today: number
+          total_mileage_readings: number
+          total_users: number
+          total_vehicles: number
+          users_with_tesla: number
+        }[]
+      }
+      get_all_users: {
+        Args: never
+        Returns: {
+          company_name: string
+          created_at: string
+          email: string
+          first_name: string
+          has_tesla_connected: boolean
+          last_name: string
+          subscription_tier: string
+          user_id: string
+          vehicle_count: number
+        }[]
+      }
       get_tesla_access_token: { Args: { p_user_id: string }; Returns: string }
       get_tesla_refresh_token: { Args: { p_user_id: string }; Returns: string }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
       is_tesla_token_expired: { Args: { p_user_id: string }; Returns: boolean }
       log_audit_event: {
         Args: {
@@ -315,7 +367,7 @@ export type Database = {
       }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "moderator" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -442,6 +494,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "moderator", "user"],
+    },
   },
 } as const
