@@ -7,15 +7,167 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Retry configuration
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
+
+// Helper function to detect offline vehicle states
+function isVehicleOfflineError(status: number, errorText: string): boolean {
+  const offlineIndicators = [
+    'vehicle unavailable',
+    'vehicle is offline',
+    'timeout',
+    'asleep',
+    'could not wake',
+    '408', // Request timeout
+    '504', // Gateway timeout
+  ];
+  
+  if (status === 408 || status === 504) return true;
+  
+  const lowerError = errorText.toLowerCase();
+  return offlineIndicators.some(indicator => lowerError.includes(indicator.toLowerCase()));
+}
+
+// Helper function with retry logic for offline vehicles
+async function fetchVehicleDataWithRetry(
+  teslaApiBaseUrl: string,
+  vehicleId: string,
+  accessToken: string,
+  retries: number = MAX_RETRIES
+): Promise<{ success: boolean; data?: any; isOffline: boolean; error?: string }> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`[tesla-sync-all] Attempt ${attempt}/${retries} for vehicle ${vehicleId}`);
+      
+      const response = await fetch(
+        `${teslaApiBaseUrl}/api/1/vehicles/${vehicleId}/vehicle_data`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        return { success: true, data, isOffline: false };
+      }
+
+      const errorText = await response.text();
+      const isOffline = isVehicleOfflineError(response.status, errorText);
+      
+      if (isOffline && attempt < retries) {
+        console.log(`[tesla-sync-all] Vehicle ${vehicleId} appears offline, retrying in ${RETRY_DELAY_MS}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        continue;
+      }
+      
+      return { 
+        success: false, 
+        isOffline, 
+        error: `API error (${response.status}): ${errorText.substring(0, 100)}` 
+      };
+      
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const isOffline = isVehicleOfflineError(0, errorMsg);
+      
+      if (attempt < retries) {
+        console.log(`[tesla-sync-all] Request failed, retrying... Error: ${errorMsg}`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        continue;
+      }
+      
+      return { success: false, isOffline, error: errorMsg };
+    }
+  }
+  
+  return { success: false, isOffline: true, error: 'Max retries exceeded' };
+}
+
+// Helper function to update sync status
+async function updateSyncStatus(
+  supabase: any,
+  vehicleId: string,
+  userId: string,
+  success: boolean,
+  isOffline: boolean,
+  errorMsg?: string
+) {
+  const now = new Date().toISOString();
+  
+  // Try to get existing sync status
+  const { data: existingStatus } = await supabase
+    .from('vehicle_sync_status')
+    .select('id, consecutive_failures')
+    .eq('vehicle_id', vehicleId)
+    .maybeSingle();
+
+  const consecutiveFailures = success 
+    ? 0 
+    : (existingStatus?.consecutive_failures || 0) + 1;
+
+  if (existingStatus) {
+    await supabase
+      .from('vehicle_sync_status')
+      .update({
+        last_sync_attempt: now,
+        last_successful_sync: success ? now : undefined,
+        consecutive_failures: consecutiveFailures,
+        last_error: errorMsg || null,
+        is_offline: isOffline,
+      })
+      .eq('id', existingStatus.id);
+  } else {
+    await supabase
+      .from('vehicle_sync_status')
+      .insert({
+        vehicle_id: vehicleId,
+        user_id: userId,
+        last_sync_attempt: now,
+        last_successful_sync: success ? now : null,
+        consecutive_failures: consecutiveFailures,
+        last_error: errorMsg || null,
+        is_offline: isOffline,
+      });
+  }
+}
+
+// Helper function to log audit events
+async function logAuditEvent(
+  supabase: any,
+  userId: string,
+  action: string,
+  entityType: string,
+  entityId?: string,
+  details?: Record<string, any>
+) {
+  try {
+    await supabase.rpc('log_audit_event', {
+      p_user_id: userId,
+      p_action: action,
+      p_entity_type: entityType,
+      p_entity_id: entityId || null,
+      p_details: details || {}
+    });
+  } catch (error) {
+    console.error('[tesla-sync-all] Failed to log audit event:', error);
+  }
+}
+
 // Helper function to sync a single user's vehicles
 async function syncUserVehicles(
   supabase: any,
   userId: string,
   accessToken: string,
   teslaApiBaseUrl: string
-): Promise<{ synced: number; errors: string[] }> {
+): Promise<{ synced: number; failed: number; offline: number; errors: string[] }> {
   const errors: string[] = [];
   let synced = 0;
+  let failed = 0;
+  let offline = 0;
 
   // Get user's vehicles
   const { data: vehicles, error: vehiclesError } = await supabase
@@ -26,35 +178,43 @@ async function syncUserVehicles(
 
   if (vehiclesError || !vehicles || vehicles.length === 0) {
     console.log(`[tesla-sync-all] No vehicles for user ${userId}`);
-    return { synced: 0, errors: [] };
+    return { synced: 0, failed: 0, offline: 0, errors: [] };
   }
 
   for (const vehicle of vehicles) {
+    const vehicleName = vehicle.display_name || vehicle.vin;
+    
     try {
-      console.log(`[tesla-sync-all] Fetching data for vehicle ${vehicle.tesla_vehicle_id}`);
+      console.log(`[tesla-sync-all] Fetching data for vehicle ${vehicle.tesla_vehicle_id} (${vehicleName})`);
       
-      const vehicleDataResponse = await fetch(
-        `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
+      // Fetch vehicle data with retry logic
+      const result = await fetchVehicleDataWithRetry(
+        teslaApiBaseUrl,
+        vehicle.tesla_vehicle_id,
+        accessToken
       );
 
-      if (!vehicleDataResponse.ok) {
-        const errorText = await vehicleDataResponse.text();
-        console.error(`[tesla-sync-all] Failed to fetch vehicle ${vehicle.tesla_vehicle_id}:`, errorText);
-        errors.push(`${vehicle.display_name || vehicle.vin}: API error (${vehicleDataResponse.status})`);
+      if (!result.success) {
+        if (result.isOffline) {
+          offline++;
+          console.log(`[tesla-sync-all] Vehicle ${vehicleName} is offline`);
+          errors.push(`${vehicleName}: Vehicle offline`);
+        } else {
+          failed++;
+          errors.push(`${vehicleName}: ${result.error}`);
+        }
+        
+        // Update sync status
+        await updateSyncStatus(supabase, vehicle.id, userId, false, result.isOffline, result.error);
         continue;
       }
 
-      const vehicleData = await vehicleDataResponse.json();
-      const odometerMiles = vehicleData.response?.vehicle_state?.odometer;
+      const odometerMiles = result.data?.response?.vehicle_state?.odometer;
 
       if (!odometerMiles) {
-        errors.push(`${vehicle.display_name || vehicle.vin}: no odometer data`);
+        failed++;
+        errors.push(`${vehicleName}: No odometer data available`);
+        await updateSyncStatus(supabase, vehicle.id, userId, false, false, 'No odometer data');
         continue;
       }
 
@@ -68,7 +228,7 @@ async function syncUserVehicles(
         .eq('vehicle_id', vehicle.id)
         .order('reading_date', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       const dailyKm = prevReading 
         ? Math.max(0, odometerKm - prevReading.odometer_km)
@@ -80,7 +240,9 @@ async function syncUserVehicles(
         .select('id')
         .eq('vehicle_id', vehicle.id)
         .eq('reading_date', today)
-        .single();
+        .maybeSingle();
+
+      let dbError = null;
 
       if (existingReading) {
         // Update existing reading
@@ -91,12 +253,7 @@ async function syncUserVehicles(
             daily_km: dailyKm,
           })
           .eq('id', existingReading.id);
-
-        if (updateError) {
-          errors.push(`${vehicle.display_name || vehicle.vin}: update failed`);
-        } else {
-          synced++;
-        }
+        dbError = updateError;
       } else {
         // Insert new reading
         const { error: insertError } = await supabase
@@ -108,21 +265,34 @@ async function syncUserVehicles(
             odometer_km: odometerKm,
             daily_km: dailyKm,
           });
+        dbError = insertError;
+      }
 
-        if (insertError) {
-          errors.push(`${vehicle.display_name || vehicle.vin}: insert failed`);
-        } else {
-          synced++;
-        }
+      if (dbError) {
+        failed++;
+        errors.push(`${vehicleName}: Database error`);
+        await updateSyncStatus(supabase, vehicle.id, userId, false, false, 'Database error');
+      } else {
+        synced++;
+        await updateSyncStatus(supabase, vehicle.id, userId, true, false);
+        
+        // Log successful sync
+        await logAuditEvent(supabase, userId, 'MILEAGE_SYNC', 'vehicle', vehicle.id, {
+          odometer_km: odometerKm,
+          daily_km: dailyKm,
+          reading_date: today
+        });
       }
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      errors.push(`${vehicle.display_name || vehicle.vin}: ${errorMsg}`);
+      failed++;
+      errors.push(`${vehicleName}: ${errorMsg}`);
+      await updateSyncStatus(supabase, vehicle.id, userId, false, false, errorMsg);
     }
   }
 
-  return { synced, errors };
+  return { synced, failed, offline, errors };
 }
 
 // Helper function to refresh token if needed
@@ -131,7 +301,7 @@ async function getValidAccessToken(
   profile: any,
   clientId: string,
   clientSecret: string
-): Promise<string | null> {
+): Promise<{ token: string | null; refreshed: boolean }> {
   let accessToken = profile.tesla_access_token;
   const expiresAt = profile.tesla_token_expires_at ? new Date(profile.tesla_token_expires_at) : null;
   
@@ -142,7 +312,7 @@ async function getValidAccessToken(
     
     if (!profile.tesla_refresh_token) {
       console.error(`[tesla-sync-all] No refresh token for user ${profile.user_id}`);
-      return null;
+      return { token: null, refreshed: false };
     }
 
     try {
@@ -158,8 +328,9 @@ async function getValidAccessToken(
       });
 
       if (!refreshResponse.ok) {
-        console.error(`[tesla-sync-all] Token refresh failed for user ${profile.user_id}`);
-        return null;
+        const errorText = await refreshResponse.text();
+        console.error(`[tesla-sync-all] Token refresh failed for user ${profile.user_id}:`, errorText);
+        return { token: null, refreshed: false };
       }
 
       const tokens = await refreshResponse.json();
@@ -174,14 +345,21 @@ async function getValidAccessToken(
         p_expires_at: newExpiresAt
       });
 
+      // Log token refresh
+      await logAuditEvent(supabase, profile.user_id, 'TOKEN_REFRESH', 'tesla_auth', null, {
+        success: true
+      });
+
       console.log(`[tesla-sync-all] Token refreshed for user ${profile.user_id}`);
+      return { token: accessToken, refreshed: true };
+      
     } catch (error) {
       console.error(`[tesla-sync-all] Token refresh error for user ${profile.user_id}:`, error);
-      return null;
+      return { token: null, refreshed: false };
     }
   }
 
-  return accessToken;
+  return { token: accessToken, refreshed: false };
 }
 
 serve(async (req) => {
@@ -226,6 +404,13 @@ serve(async (req) => {
 
     if (!profiles || profiles.length === 0) {
       console.log('[tesla-sync-all] No users with Tesla tokens found');
+      
+      // Log sync attempt even if no users
+      await logAuditEvent(supabase, null as any, 'SYNC_ALL', 'system', null, {
+        trigger: 'cron',
+        users_found: 0
+      });
+      
       return new Response(
         JSON.stringify({ 
           success: true, 
@@ -240,8 +425,11 @@ serve(async (req) => {
     console.log(`[tesla-sync-all] Found ${profiles.length} users with Tesla tokens`);
 
     let totalSynced = 0;
+    let totalFailed = 0;
+    let totalOffline = 0;
     let usersProcessed = 0;
     let usersFailed = 0;
+    let tokensRefreshed = 0;
     const allErrors: string[] = [];
 
     // Process each user
@@ -250,17 +438,29 @@ serve(async (req) => {
         console.log(`[tesla-sync-all] Processing user ${profile.user_id}`);
         
         // Get valid access token (refresh if needed)
-        const accessToken = await getValidAccessToken(supabase, profile, clientId, clientSecret);
+        const { token: accessToken, refreshed } = await getValidAccessToken(
+          supabase, 
+          profile, 
+          clientId, 
+          clientSecret
+        );
+        
+        if (refreshed) tokensRefreshed++;
         
         if (!accessToken) {
           console.error(`[tesla-sync-all] Could not get valid token for user ${profile.user_id}`);
           usersFailed++;
-          allErrors.push(`User ${profile.user_id}: token invalid`);
+          allErrors.push(`User ${profile.user_id.substring(0, 8)}...: Token invalid`);
+          
+          // Log failed token
+          await logAuditEvent(supabase, profile.user_id, 'SYNC_FAILED', 'user', profile.user_id, {
+            reason: 'invalid_token'
+          });
           continue;
         }
 
         // Sync user's vehicles
-        const { synced, errors } = await syncUserVehicles(
+        const { synced, failed, offline, errors } = await syncUserVehicles(
           supabase,
           profile.user_id,
           accessToken,
@@ -268,13 +468,15 @@ serve(async (req) => {
         );
 
         totalSynced += synced;
+        totalFailed += failed;
+        totalOffline += offline;
         usersProcessed++;
         
         if (errors.length > 0) {
-          allErrors.push(...errors.map(e => `User ${profile.user_id}: ${e}`));
+          allErrors.push(...errors.map(e => `User ${profile.user_id.substring(0, 8)}...: ${e}`));
         }
 
-        console.log(`[tesla-sync-all] User ${profile.user_id}: ${synced} vehicles synced`);
+        console.log(`[tesla-sync-all] User ${profile.user_id}: ${synced} synced, ${failed} failed, ${offline} offline`);
 
         // Small delay between users to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -283,21 +485,39 @@ serve(async (req) => {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         console.error(`[tesla-sync-all] Error processing user ${profile.user_id}:`, errorMsg);
         usersFailed++;
-        allErrors.push(`User ${profile.user_id}: ${errorMsg}`);
+        allErrors.push(`User ${profile.user_id.substring(0, 8)}...: ${errorMsg}`);
       }
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[tesla-sync-all] Completed in ${duration}ms: ${usersProcessed}/${profiles.length} users, ${totalSynced} vehicles synced`);
+    
+    // Log overall sync completion
+    await logAuditEvent(supabase, null as any, 'SYNC_ALL_COMPLETE', 'system', null, {
+      total_users: profiles.length,
+      users_processed: usersProcessed,
+      users_failed: usersFailed,
+      vehicles_synced: totalSynced,
+      vehicles_failed: totalFailed,
+      vehicles_offline: totalOffline,
+      tokens_refreshed: tokensRefreshed,
+      duration_ms: duration
+    });
+    
+    console.log(`[tesla-sync-all] Completed in ${duration}ms: ${usersProcessed}/${profiles.length} users, ${totalSynced} synced, ${totalFailed} failed, ${totalOffline} offline`);
 
     return new Response(
       JSON.stringify({ 
         success: true,
         message: `Synced ${totalSynced} vehicles for ${usersProcessed} users`,
-        total_users: profiles.length,
-        users_processed: usersProcessed,
-        users_failed: usersFailed,
-        synced_vehicles: totalSynced,
+        stats: {
+          total_users: profiles.length,
+          users_processed: usersProcessed,
+          users_failed: usersFailed,
+          vehicles_synced: totalSynced,
+          vehicles_failed: totalFailed,
+          vehicles_offline: totalOffline,
+          tokens_refreshed: tokensRefreshed,
+        },
         duration_ms: duration,
         errors: allErrors.length > 0 ? allErrors : undefined
       }),
