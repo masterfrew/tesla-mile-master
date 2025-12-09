@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAdminCheck } from '@/hooks/useAdminCheck';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -68,6 +69,7 @@ interface MileageStats {
 
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
+  const { isAdmin } = useAdminCheck();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
@@ -323,6 +325,17 @@ const Dashboard: React.FC = () => {
                         <Trash2 className="h-4 w-4 mr-2" />
                         {disconnecting ? 'Verbreken...' : 'Verbreek Tesla koppeling'}
                       </DropdownMenuItem>
+                    </>
+                  )}
+                  {isAdmin && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <Link to="/admin">
+                        <DropdownMenuItem>
+                          <Shield className="h-4 w-4 mr-2" />
+                          Admin Dashboard
+                        </DropdownMenuItem>
+                      </Link>
                     </>
                   )}
                   <DropdownMenuSeparator />
