@@ -301,6 +301,18 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-4">
+              {vehicles.length > 0 && (
+                <Button 
+                  onClick={handleSync} 
+                  disabled={syncing}
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+                  {syncing ? 'Synchroniseren...' : 'Sync nu'}
+                </Button>
+              )}
               <Badge variant={profile?.subscription_tier === 'premium' ? 'default' : 'secondary'}>
                 {profile?.subscription_tier === 'premium' ? 'Premium' : 'Basis'}
               </Badge>
