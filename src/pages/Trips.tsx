@@ -239,7 +239,6 @@ const Trips = () => {
             startDate,
             endDate,
           }}
-          onRefresh={() => setRefreshTrigger(prev => prev + 1)}
         />
       </div>
     </div>
