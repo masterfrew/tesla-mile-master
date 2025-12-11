@@ -217,36 +217,78 @@ serve(async (req) => {
 
         // Convert miles to kilometers
         const odometerKm = Math.round(odometerMiles * 1.60934);
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
 
-        console.log(`[tesla-mileage] Vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km`);
+        // Get location data from Tesla API if available
+        const driveState = vehicleData.response?.drive_state;
+        const locationName = driveState?.active_route_destination || null;
+        const latitude = driveState?.latitude || null;
+        const longitude = driveState?.longitude || null;
 
-        // Get previous reading to calculate daily km
+        console.log(`[tesla-mileage] Vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km, location: ${latitude}, ${longitude}`);
+
+        // Get the most recent reading to calculate daily km
         const { data: prevReading } = await supabase
           .from('mileage_readings')
-          .select('odometer_km')
+          .select('odometer_km, reading_date')
           .eq('vehicle_id', vehicle.id)
           .order('reading_date', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         const dailyKm = prevReading 
           ? Math.max(0, odometerKm - prevReading.odometer_km)
           : 0;
 
-        // Store mileage reading
-        const { error: insertError } = await supabase
+        // If there's km driven and we have a previous reading, 
+        // update the PREVIOUS day's record with the daily_km
+        // because the km was driven on that day, not today
+        if (dailyKm > 0 && prevReading) {
+          console.log(`[tesla-mileage] Updating previous day (${prevReading.reading_date}) with ${dailyKm} km driven`);
+          
+          // Update the previous reading with the km driven
+          const { error: updateError } = await supabase
+            .from('mileage_readings')
+            .update({ 
+              daily_km: dailyKm,
+              metadata: {
+                updated_at: now.toISOString(),
+                end_odometer_km: odometerKm,
+                latitude,
+                longitude,
+                location_name: locationName,
+              }
+            })
+            .eq('vehicle_id', vehicle.id)
+            .eq('reading_date', prevReading.reading_date);
+
+          if (updateError) {
+            console.error(`[tesla-mileage] Failed to update previous reading:`, updateError);
+          }
+        }
+
+        // UPSERT today's reading (snapshot of current odometer)
+        const { error: upsertError } = await supabase
           .from('mileage_readings')
-          .insert({
+          .upsert({
             vehicle_id: vehicle.id,
             user_id: user.id,
             reading_date: today,
             odometer_km: odometerKm,
-            daily_km: dailyKm,
+            daily_km: 0, // Today's km will be calculated when we sync tomorrow
+            location_name: locationName,
+            metadata: {
+              synced_at: now.toISOString(),
+              latitude,
+              longitude,
+            }
+          }, {
+            onConflict: 'vehicle_id,reading_date',
           });
 
-        if (insertError) {
-          console.error(`[tesla-mileage] Failed to insert mileage for vehicle ${vehicle.tesla_vehicle_id}:`, insertError);
+        if (upsertError) {
+          console.error(`[tesla-mileage] Failed to upsert mileage for vehicle ${vehicle.tesla_vehicle_id}:`, upsertError);
           errors.push(`${vehicle.display_name || vehicle.vin}: database fout`);
         } else {
           console.log(`[tesla-mileage] SUCCESS: Stored mileage for vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km`);
