@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TripsList } from '@/components/TripsList';
 import { TripsFilter } from '@/components/TripsFilter';
 import { TripsStats } from '@/components/TripsStats';
+import { TripsMap } from '@/components/TripsMap';
 import { supabase } from '@/integrations/supabase/client';
 import { Car, ArrowLeft, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,12 +17,23 @@ interface Vehicle {
   year: number;
 }
 
+interface TripLocation {
+  id: string;
+  reading_date: string;
+  daily_km: number;
+  latitude: number;
+  longitude: number;
+  vehicle_name: string;
+  location_name?: string;
+}
+
 const Trips = () => {
   const { user } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [tripLocations, setTripLocations] = useState<TripLocation[]>([]);
   
   // Filter state
   const [selectedVehicle, setSelectedVehicle] = useState('all');
@@ -146,6 +158,59 @@ const Trips = () => {
     }
   };
 
+  const fetchTripLocations = async () => {
+    if (!user) return;
+
+    try {
+      let query = supabase
+        .from('mileage_readings')
+        .select(`
+          id,
+          reading_date,
+          daily_km,
+          metadata,
+          location_name,
+          vehicle:vehicles(display_name)
+        `)
+        .eq('user_id', user.id)
+        .not('metadata->latitude', 'is', null)
+        .order('reading_date', { ascending: false })
+        .limit(50);
+
+      if (selectedVehicle && selectedVehicle !== 'all') {
+        query = query.eq('vehicle_id', selectedVehicle);
+      }
+
+      if (startDate) {
+        query = query.gte('reading_date', startDate);
+      }
+
+      if (endDate) {
+        query = query.lte('reading_date', endDate);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      const locations: TripLocation[] = (data || [])
+        .filter((trip: any) => trip.metadata?.latitude && trip.metadata?.longitude)
+        .map((trip: any) => ({
+          id: trip.id,
+          reading_date: trip.reading_date,
+          daily_km: trip.daily_km || 0,
+          latitude: trip.metadata.latitude,
+          longitude: trip.metadata.longitude,
+          vehicle_name: trip.vehicle?.display_name || 'Onbekend',
+          location_name: trip.location_name || trip.metadata?.location_name,
+        }));
+
+      setTripLocations(locations);
+    } catch (error) {
+      console.error('Error fetching trip locations:', error);
+    }
+  };
+
   const handleResetFilters = () => {
     setSelectedVehicle('all');
     setSelectedPurpose('all');
@@ -162,6 +227,7 @@ const Trips = () => {
 
   useEffect(() => {
     fetchStats();
+    fetchTripLocations();
   }, [user, selectedVehicle, selectedPurpose, startDate, endDate, refreshTrigger]);
 
   if (vehicles.length === 0) {
@@ -215,6 +281,8 @@ const Trips = () => {
           totalPersonalKm={stats.totalPersonalKm}
           totalKm={stats.totalKm}
         />
+
+        <TripsMap locations={tripLocations} />
         
         <TripsFilter
           vehicles={vehicles}
