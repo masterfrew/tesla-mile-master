@@ -50,6 +50,39 @@ export type Database = {
         }
         Relationships: []
       }
+      encrypted_tesla_tokens: {
+        Row: {
+          created_at: string | null
+          encrypted_access_token: string | null
+          encrypted_refresh_token: string | null
+          encryption_version: number | null
+          id: string
+          token_expires_at: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          encrypted_access_token?: string | null
+          encrypted_refresh_token?: string | null
+          encryption_version?: number | null
+          id?: string
+          token_expires_at?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          encrypted_access_token?: string | null
+          encrypted_refresh_token?: string | null
+          encryption_version?: number | null
+          id?: string
+          token_expires_at?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       google_sheets_integrations: {
         Row: {
           created_at: string
@@ -308,6 +341,10 @@ export type Database = {
       cleanup_expired_pkce_states: { Args: never; Returns: undefined }
       cleanup_expired_tesla_tokens: { Args: never; Returns: undefined }
       cleanup_old_pkce_states: { Args: never; Returns: undefined }
+      clear_encrypted_tesla_tokens: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
       get_admin_stats: {
         Args: never
         Returns: {
@@ -332,6 +369,14 @@ export type Database = {
           vehicle_count: number
         }[]
       }
+      get_encrypted_tesla_tokens: {
+        Args: { p_user_id: string }
+        Returns: {
+          encrypted_access_token: string
+          encrypted_refresh_token: string
+          token_expires_at: string
+        }[]
+      }
       get_tesla_access_token: { Args: { p_user_id: string }; Returns: string }
       get_tesla_refresh_token: { Args: { p_user_id: string }; Returns: string }
       has_role: {
@@ -354,6 +399,15 @@ export type Database = {
       }
       mark_token_refresh_needed: {
         Args: { p_user_id: string }
+        Returns: undefined
+      }
+      store_encrypted_tesla_tokens: {
+        Args: {
+          p_encrypted_access_token: string
+          p_encrypted_refresh_token: string
+          p_expires_at: string
+          p_user_id: string
+        }
         Returns: undefined
       }
       store_tesla_tokens: {
