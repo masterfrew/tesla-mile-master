@@ -167,11 +167,15 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
 
   const exportToCSV = () => {
     const csvContent = [
-      'Datum,Voertuig,Kilometers,Kilometerstand,Locatie,Doel,Beschrijving',
+      'Datum,Tijdstip,Voertuig,VIN,Kilometers,Start km-stand,Eind km-stand,Locatie,Latitude,Longitude,Doel,Beschrijving',
       ...trips.map(trip => {
         const purpose = trip.metadata?.purpose === 'business' ? 'Zakelijk' : 'Privé';
         const description = trip.metadata?.description || '';
-        return `${trip.reading_date},${trip.vehicle?.display_name || 'Onbekend'},${trip.daily_km},${trip.odometer_km},"${trip.location_name || ''}","${purpose}","${description}"`;
+        const time = trip.metadata?.synced_at ? formatTime(trip.metadata.synced_at) : '';
+        const lat = trip.metadata?.latitude || '';
+        const lng = trip.metadata?.longitude || '';
+        const startOdo = trip.odometer_km - (trip.daily_km || 0);
+        return `${trip.reading_date},"${time}","${trip.vehicle?.display_name || 'Onbekend'}","",${trip.daily_km},${startOdo},${trip.odometer_km},"${trip.location_name || ''}",${lat},${lng},"${purpose}","${description}"`;
       })
     ].join('\n');
 
@@ -255,58 +259,59 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
                     className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition-colors"
                   >
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2 flex-wrap">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <Calendar className="h-4 w-4 text-muted-foreground" />
+                      {/* Header row with date, time and badge */}
+                      <div className="flex items-center gap-3 mb-3 flex-wrap">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Calendar className="h-4 w-4 text-primary" />
                           {formatDate(trip.reading_date)}
+                          {trip.metadata?.synced_at && (
+                            <span className="text-muted-foreground font-normal">
+                              om {formatTime(trip.metadata.synced_at)}
+                            </span>
+                          )}
                         </div>
-                        {trip.metadata?.synced_at && (
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {formatTime(trip.metadata.synced_at)}
-                          </div>
-                        )}
                         <Badge 
                           variant={trip.metadata?.purpose === 'business' ? 'default' : 'secondary'}
-                          className="text-xs"
                         >
                           {trip.metadata?.purpose === 'business' ? 'Zakelijk' : 'Privé'}
                         </Badge>
                       </div>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-muted-foreground">
+                      {/* Main stats grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
                         <div className="flex items-center gap-2">
-                          <Car className="h-4 w-4" />
-                          {trip.vehicle?.display_name || 'Onbekend voertuig'}
+                          <Car className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">{trip.vehicle?.display_name || 'Onbekend'}</span>
                         </div>
-                        <div>
-                          <span className={`font-medium ${trip.daily_km > 0 ? 'text-primary' : ''}`}>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-lg font-semibold ${trip.daily_km > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
                             {trip.daily_km} km
-                          </span> gereden
+                          </span>
                         </div>
-                        <div>
-                          Stand: <span className="font-medium">{trip.odometer_km.toLocaleString()} km</span>
+                        <div className="text-muted-foreground">
+                          Start: {(trip.odometer_km - (trip.daily_km || 0)).toLocaleString()} km
+                        </div>
+                        <div className="text-muted-foreground">
+                          Eind: <span className="font-medium">{trip.odometer_km.toLocaleString()} km</span>
                         </div>
                       </div>
 
-                      {/* Location info */}
+                      {/* Location info - more prominent */}
                       {(trip.location_name || trip.metadata?.latitude) && (
-                        <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-                          {trip.location_name && (
-                            <div className="flex items-center gap-1">
-                              <MapPin className="h-4 w-4" />
-                              {trip.location_name}
-                            </div>
-                          )}
+                        <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md text-sm">
+                          <MapPin className="h-4 w-4 text-primary flex-shrink-0" />
+                          <span className="text-foreground">
+                            {trip.location_name || 'Locatie beschikbaar'}
+                          </span>
                           {trip.metadata?.latitude && trip.metadata?.longitude && (
                             <a 
                               href={`https://www.google.com/maps?q=${trip.metadata.latitude},${trip.metadata.longitude}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-primary hover:underline"
+                              className="ml-auto flex items-center gap-1 text-primary hover:underline font-medium"
                             >
-                              <Navigation className="h-3 w-3" />
-                              Bekijk op kaart
+                              <Navigation className="h-4 w-4" />
+                              Kaart
                             </a>
                           )}
                         </div>
