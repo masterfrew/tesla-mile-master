@@ -368,6 +368,18 @@ serve(async (req) => {
   }
 
   try {
+    // Verify CRON_SECRET for authorization
+    const cronSecret = Deno.env.get('CRON_SECRET');
+    const providedSecret = req.headers.get('x-cron-secret');
+    
+    if (!cronSecret || providedSecret !== cronSecret) {
+      console.error('[tesla-sync-all] Unauthorized: Invalid or missing cron secret');
+      return new Response(
+        JSON.stringify({ error: 'unauthorized', message: 'Invalid or missing cron secret' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     console.log('[tesla-sync-all] Starting multi-user Tesla sync...');
     const startTime = Date.now();
 
