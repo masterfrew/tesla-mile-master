@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Calendar, MapPin, Car, MoreHorizontal, Download, Edit, Trash2, Loader2 } from 'lucide-react';
+import { Calendar, MapPin, Car, MoreHorizontal, Download, Edit, Trash2, Loader2, Clock, Navigation } from 'lucide-react';
 import { toast } from 'sonner';
 import { TripEditDialog } from './TripEditDialog';
 
@@ -200,6 +200,18 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
     });
   };
 
+  const formatTime = (isoString: string | null) => {
+    if (!isoString) return null;
+    try {
+      return new Date(isoString).toLocaleTimeString('nl-NL', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return null;
+    }
+  };
+
   if (loading) {
     return (
       <Card>
@@ -243,11 +255,17 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
                     className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition-colors"
                   >
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
                         <div className="flex items-center gap-2 text-sm font-medium">
                           <Calendar className="h-4 w-4 text-muted-foreground" />
                           {formatDate(trip.reading_date)}
                         </div>
+                        {trip.metadata?.synced_at && (
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {formatTime(trip.metadata.synced_at)}
+                          </div>
+                        )}
                         <Badge 
                           variant={trip.metadata?.purpose === 'business' ? 'default' : 'secondary'}
                           className="text-xs"
@@ -262,17 +280,35 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
                           {trip.vehicle?.display_name || 'Onbekend voertuig'}
                         </div>
                         <div>
-                          <span className="font-medium">{trip.daily_km} km</span> gereden
+                          <span className={`font-medium ${trip.daily_km > 0 ? 'text-primary' : ''}`}>
+                            {trip.daily_km} km
+                          </span> gereden
                         </div>
                         <div>
                           Stand: <span className="font-medium">{trip.odometer_km.toLocaleString()} km</span>
                         </div>
                       </div>
 
-                      {trip.location_name && (
-                        <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-                          <MapPin className="h-4 w-4" />
-                          {trip.location_name}
+                      {/* Location info */}
+                      {(trip.location_name || trip.metadata?.latitude) && (
+                        <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
+                          {trip.location_name && (
+                            <div className="flex items-center gap-1">
+                              <MapPin className="h-4 w-4" />
+                              {trip.location_name}
+                            </div>
+                          )}
+                          {trip.metadata?.latitude && trip.metadata?.longitude && (
+                            <a 
+                              href={`https://www.google.com/maps?q=${trip.metadata.latitude},${trip.metadata.longitude}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-primary hover:underline"
+                            >
+                              <Navigation className="h-3 w-3" />
+                              Bekijk op kaart
+                            </a>
+                          )}
                         </div>
                       )}
 
