@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
+import { encryptToken } from '../_shared/encryption.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -186,15 +187,19 @@ serve(async (req) => {
       );
     }
 
-    // Store tokens using the secure function
+    // Store tokens using the secure encrypted function
     const expiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
     
-    console.log('[tesla-auth] Storing tokens with expiry:', expiresAt);
+    console.log('[tesla-auth] Encrypting and storing tokens with expiry:', expiresAt);
 
-    const { error: storeError } = await supabase.rpc('store_tesla_tokens', {
+    // Encrypt tokens before storage
+    const encryptedAccessToken = await encryptToken(tokens.access_token);
+    const encryptedRefreshToken = await encryptToken(tokens.refresh_token);
+
+    const { error: storeError } = await supabase.rpc('store_encrypted_tesla_tokens', {
       p_user_id: user.id,
-      p_access_token: tokens.access_token,
-      p_refresh_token: tokens.refresh_token,
+      p_encrypted_access_token: encryptedAccessToken,
+      p_encrypted_refresh_token: encryptedRefreshToken,
       p_expires_at: expiresAt
     });
 

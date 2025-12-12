@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
+import { encryptToken, decryptToken } from '../_shared/encryption.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -47,26 +48,15 @@ serve(async (req) => {
 
     console.log('[tesla-vehicles] Getting tokens for user:', user.id);
 
-    // Get tokens and check expiry
-    const { data: profile, error: tokenError } = await supabase
-      .from('profiles')
-      .select('tesla_access_token, tesla_refresh_token, tesla_token_expires_at')
+    // Get encrypted tokens
+    const { data: encryptedTokenData, error: tokenError } = await supabase
+      .from('encrypted_tesla_tokens')
+      .select('encrypted_access_token, encrypted_refresh_token, token_expires_at')
       .eq('user_id', user.id)
       .single();
 
-    if (tokenError || !profile) {
-      console.error('[tesla-vehicles] Failed to get profile:', tokenError);
-      return new Response(
-        JSON.stringify({ 
-          error: 'no_profile',
-          message: 'Geen profiel gevonden'
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    if (!profile.tesla_access_token) {
-      console.error('[tesla-vehicles] No Tesla access token found');
+    if (tokenError || !encryptedTokenData) {
+      console.error('[tesla-vehicles] Failed to get encrypted tokens:', tokenError);
       return new Response(
         JSON.stringify({ 
           error: 'no_token',
@@ -76,14 +66,39 @@ serve(async (req) => {
       );
     }
 
-    // Check if token is expired
-    let accessToken = profile.tesla_access_token;
-    const expiresAt = profile.tesla_token_expires_at ? new Date(profile.tesla_token_expires_at) : null;
+    if (!encryptedTokenData.encrypted_access_token) {
+      console.error('[tesla-vehicles] No encrypted Tesla access token found');
+      return new Response(
+        JSON.stringify({ 
+          error: 'no_token',
+          message: 'Geen Tesla toegangstoken gevonden. Verbind je Tesla account opnieuw.'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Decrypt access token
+    let accessToken: string;
+    try {
+      accessToken = await decryptToken(encryptedTokenData.encrypted_access_token);
+    } catch (error) {
+      console.error('[tesla-vehicles] Failed to decrypt access token:', error);
+      return new Response(
+        JSON.stringify({ 
+          error: 'decryption_failed',
+          message: 'Kon token niet ontsleutelen. Verbind je Tesla account opnieuw.'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const expiresAt = encryptedTokenData.token_expires_at ? new Date(encryptedTokenData.token_expires_at) : null;
     
+    // Check if token is expired
     if (expiresAt && expiresAt < new Date()) {
       console.log('[tesla-vehicles] Token expired, attempting refresh...');
       
-      if (!profile.tesla_refresh_token) {
+      if (!encryptedTokenData.encrypted_refresh_token) {
         console.error('[tesla-vehicles] No refresh token available');
         return new Response(
           JSON.stringify({ 
@@ -91,6 +106,21 @@ serve(async (req) => {
             message: 'Token verlopen en geen refresh token beschikbaar. Verbind je Tesla account opnieuw.'
           }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Decrypt refresh token
+      let refreshToken: string;
+      try {
+        refreshToken = await decryptToken(encryptedTokenData.encrypted_refresh_token);
+      } catch (error) {
+        console.error('[tesla-vehicles] Failed to decrypt refresh token:', error);
+        return new Response(
+          JSON.stringify({ 
+            error: 'decryption_failed',
+            message: 'Kon refresh token niet ontsleutelen. Verbind je Tesla account opnieuw.'
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
@@ -115,7 +145,7 @@ serve(async (req) => {
           grant_type: 'refresh_token',
           client_id: clientId,
           client_secret: clientSecret,
-          refresh_token: profile.tesla_refresh_token,
+          refresh_token: refreshToken,
         }),
       });
 
@@ -134,12 +164,15 @@ serve(async (req) => {
       const tokens = await refreshResponse.json();
       accessToken = tokens.access_token;
 
-      // Store refreshed tokens
+      // Encrypt and store refreshed tokens
       const newExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
-      await supabase.rpc('store_tesla_tokens', {
+      const encryptedAccessToken = await encryptToken(tokens.access_token);
+      const encryptedRefreshToken = await encryptToken(tokens.refresh_token);
+      
+      await supabase.rpc('store_encrypted_tesla_tokens', {
         p_user_id: user.id,
-        p_access_token: tokens.access_token,
-        p_refresh_token: tokens.refresh_token,
+        p_encrypted_access_token: encryptedAccessToken,
+        p_encrypted_refresh_token: encryptedRefreshToken,
         p_expires_at: newExpiresAt
       });
 
