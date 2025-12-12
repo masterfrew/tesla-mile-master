@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
+import { encryptToken, decryptToken } from '../_shared/encryption.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -298,20 +299,40 @@ async function syncUserVehicles(
 // Helper function to refresh token if needed
 async function getValidAccessToken(
   supabase: any,
-  profile: any,
+  userId: string,
+  encryptedAccessToken: string | null,
+  encryptedRefreshToken: string | null,
+  expiresAt: Date | null,
   clientId: string,
   clientSecret: string
 ): Promise<{ token: string | null; refreshed: boolean }> {
-  let accessToken = profile.tesla_access_token;
-  const expiresAt = profile.tesla_token_expires_at ? new Date(profile.tesla_token_expires_at) : null;
+  // Decrypt access token
+  let accessToken: string | null = null;
+  if (encryptedAccessToken) {
+    try {
+      accessToken = await decryptToken(encryptedAccessToken);
+    } catch (error) {
+      console.error(`[tesla-sync-all] Failed to decrypt access token for user ${userId}:`, error);
+      return { token: null, refreshed: false };
+    }
+  }
   
   // Check if token is expired or will expire in the next 5 minutes
   const bufferTime = 5 * 60 * 1000; // 5 minutes buffer
   if (expiresAt && expiresAt.getTime() - bufferTime < Date.now()) {
-    console.log(`[tesla-sync-all] Token expired for user ${profile.user_id}, refreshing...`);
+    console.log(`[tesla-sync-all] Token expired for user ${userId}, refreshing...`);
     
-    if (!profile.tesla_refresh_token) {
-      console.error(`[tesla-sync-all] No refresh token for user ${profile.user_id}`);
+    if (!encryptedRefreshToken) {
+      console.error(`[tesla-sync-all] No refresh token for user ${userId}`);
+      return { token: null, refreshed: false };
+    }
+
+    // Decrypt refresh token
+    let refreshToken: string;
+    try {
+      refreshToken = await decryptToken(encryptedRefreshToken);
+    } catch (error) {
+      console.error(`[tesla-sync-all] Failed to decrypt refresh token for user ${userId}:`, error);
       return { token: null, refreshed: false };
     }
 
@@ -323,38 +344,41 @@ async function getValidAccessToken(
           grant_type: 'refresh_token',
           client_id: clientId,
           client_secret: clientSecret,
-          refresh_token: profile.tesla_refresh_token,
+          refresh_token: refreshToken,
         }),
       });
 
       if (!refreshResponse.ok) {
         const errorText = await refreshResponse.text();
-        console.error(`[tesla-sync-all] Token refresh failed for user ${profile.user_id}:`, errorText);
+        console.error(`[tesla-sync-all] Token refresh failed for user ${userId}:`, errorText);
         return { token: null, refreshed: false };
       }
 
       const tokens = await refreshResponse.json();
       accessToken = tokens.access_token;
 
-      // Store refreshed tokens
+      // Encrypt and store refreshed tokens
       const newExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
-      await supabase.rpc('store_tesla_tokens', {
-        p_user_id: profile.user_id,
-        p_access_token: tokens.access_token,
-        p_refresh_token: tokens.refresh_token,
+      const newEncryptedAccessToken = await encryptToken(tokens.access_token);
+      const newEncryptedRefreshToken = await encryptToken(tokens.refresh_token);
+      
+      await supabase.rpc('store_encrypted_tesla_tokens', {
+        p_user_id: userId,
+        p_encrypted_access_token: newEncryptedAccessToken,
+        p_encrypted_refresh_token: newEncryptedRefreshToken,
         p_expires_at: newExpiresAt
       });
 
       // Log token refresh
-      await logAuditEvent(supabase, profile.user_id, 'TOKEN_REFRESH', 'tesla_auth', null, {
+      await logAuditEvent(supabase, userId, 'TOKEN_REFRESH', 'tesla_auth', null, {
         success: true
       });
 
-      console.log(`[tesla-sync-all] Token refreshed for user ${profile.user_id}`);
+      console.log(`[tesla-sync-all] Token refreshed for user ${userId}`);
       return { token: accessToken, refreshed: true };
       
     } catch (error) {
-      console.error(`[tesla-sync-all] Token refresh error for user ${profile.user_id}:`, error);
+      console.error(`[tesla-sync-all] Token refresh error for user ${userId}:`, error);
       return { token: null, refreshed: false };
     }
   }
@@ -400,21 +424,21 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get all users with Tesla tokens
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('user_id, tesla_access_token, tesla_refresh_token, tesla_token_expires_at')
-      .not('tesla_access_token', 'is', null);
+    // Get all users with encrypted Tesla tokens
+    const { data: encryptedTokens, error: tokensError } = await supabase
+      .from('encrypted_tesla_tokens')
+      .select('user_id, encrypted_access_token, encrypted_refresh_token, token_expires_at')
+      .not('encrypted_access_token', 'is', null);
 
-    if (profilesError) {
-      console.error('[tesla-sync-all] Failed to get profiles:', profilesError);
+    if (tokensError) {
+      console.error('[tesla-sync-all] Failed to get encrypted tokens:', tokensError);
       return new Response(
-        JSON.stringify({ error: 'database_error', message: 'Failed to fetch profiles' }),
+        JSON.stringify({ error: 'database_error', message: 'Failed to fetch encrypted tokens' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    if (!profiles || profiles.length === 0) {
+    if (!encryptedTokens || encryptedTokens.length === 0) {
       console.log('[tesla-sync-all] No users with Tesla tokens found');
       
       // Log sync attempt even if no users
@@ -434,7 +458,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[tesla-sync-all] Found ${profiles.length} users with Tesla tokens`);
+    console.log(`[tesla-sync-all] Found ${encryptedTokens.length} users with Tesla tokens`);
 
     let totalSynced = 0;
     let totalFailed = 0;
@@ -445,14 +469,19 @@ serve(async (req) => {
     const allErrors: string[] = [];
 
     // Process each user
-    for (const profile of profiles) {
+    for (const tokenRecord of encryptedTokens) {
       try {
-        console.log(`[tesla-sync-all] Processing user ${profile.user_id}`);
+        console.log(`[tesla-sync-all] Processing user ${tokenRecord.user_id}`);
         
-        // Get valid access token (refresh if needed)
+        const expiresAt = tokenRecord.token_expires_at ? new Date(tokenRecord.token_expires_at) : null;
+        
+        // Get valid access token (decrypt and refresh if needed)
         const { token: accessToken, refreshed } = await getValidAccessToken(
           supabase, 
-          profile, 
+          tokenRecord.user_id,
+          tokenRecord.encrypted_access_token,
+          tokenRecord.encrypted_refresh_token,
+          expiresAt,
           clientId, 
           clientSecret
         );
@@ -460,12 +489,12 @@ serve(async (req) => {
         if (refreshed) tokensRefreshed++;
         
         if (!accessToken) {
-          console.error(`[tesla-sync-all] Could not get valid token for user ${profile.user_id}`);
+          console.error(`[tesla-sync-all] Could not get valid token for user ${tokenRecord.user_id}`);
           usersFailed++;
-          allErrors.push(`User ${profile.user_id.substring(0, 8)}...: Token invalid`);
+          allErrors.push(`User ${tokenRecord.user_id.substring(0, 8)}...: Token invalid`);
           
           // Log failed token
-          await logAuditEvent(supabase, profile.user_id, 'SYNC_FAILED', 'user', profile.user_id, {
+          await logAuditEvent(supabase, tokenRecord.user_id, 'SYNC_FAILED', 'user', tokenRecord.user_id, {
             reason: 'invalid_token'
           });
           continue;
@@ -474,7 +503,7 @@ serve(async (req) => {
         // Sync user's vehicles
         const { synced, failed, offline, errors } = await syncUserVehicles(
           supabase,
-          profile.user_id,
+          tokenRecord.user_id,
           accessToken,
           teslaApiBaseUrl
         );
@@ -485,19 +514,19 @@ serve(async (req) => {
         usersProcessed++;
         
         if (errors.length > 0) {
-          allErrors.push(...errors.map(e => `User ${profile.user_id.substring(0, 8)}...: ${e}`));
+          allErrors.push(...errors.map(e => `User ${tokenRecord.user_id.substring(0, 8)}...: ${e}`));
         }
 
-        console.log(`[tesla-sync-all] User ${profile.user_id}: ${synced} synced, ${failed} failed, ${offline} offline`);
+        console.log(`[tesla-sync-all] User ${tokenRecord.user_id}: ${synced} synced, ${failed} failed, ${offline} offline`);
 
         // Small delay between users to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 500));
 
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`[tesla-sync-all] Error processing user ${profile.user_id}:`, errorMsg);
+        console.error(`[tesla-sync-all] Error processing user ${tokenRecord.user_id}:`, errorMsg);
         usersFailed++;
-        allErrors.push(`User ${profile.user_id.substring(0, 8)}...: ${errorMsg}`);
+        allErrors.push(`User ${tokenRecord.user_id.substring(0, 8)}...: ${errorMsg}`);
       }
     }
 
