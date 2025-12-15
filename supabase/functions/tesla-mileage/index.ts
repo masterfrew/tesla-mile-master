@@ -132,6 +132,15 @@ async function refreshAccessToken(
   return { accessToken: tokens.access_token };
 }
 
+// Date helpers (work in UTC date strings: YYYY-MM-DD)
+const toDateStr = (d: Date) => d.toISOString().split('T')[0];
+const parseDateStr = (s: string) => new Date(`${s}T00:00:00.000Z`);
+const addDays = (s: string, days: number) => {
+  const d = parseDateStr(s);
+  d.setUTCDate(d.getUTCDate() + days);
+  return toDateStr(d);
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -310,61 +319,115 @@ serve(async (req) => {
         console.log(`[tesla-mileage] Vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km, location: ${latitude}, ${longitude}`);
 
         // Get the most recent reading to calculate daily km
-        const { data: prevReading } = await supabase
+        const { data: lastReading } = await supabase
           .from('mileage_readings')
-          .select('odometer_km, reading_date')
+          .select('odometer_km, reading_date, metadata')
           .eq('vehicle_id', vehicle.id)
           .order('reading_date', { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        const dailyKm = prevReading 
-          ? Math.max(0, odometerKm - prevReading.odometer_km)
-          : 0;
+        // Backfill missing days to avoid gaps in UI (set 0 km on missing days)
+        if (lastReading?.reading_date) {
+          let cursor = addDays(lastReading.reading_date, 1);
+          while (cursor < today) {
+            const { error: backfillError } = await supabase
+              .from('mileage_readings')
+              .upsert(
+                {
+                  vehicle_id: vehicle.id,
+                  user_id: user.id,
+                  reading_date: cursor,
+                  odometer_km: lastReading.odometer_km,
+                  daily_km: 0,
+                  location_name: null,
+                  metadata: {
+                    ...(lastReading.metadata || {}),
+                    synthetic: true,
+                    synthetic_reason: 'gap_fill',
+                    synced_at: now.toISOString(),
+                  },
+                },
+                { onConflict: 'vehicle_id,reading_date' }
+              );
 
-        // If there's km driven and we have a previous reading, 
-        // update the PREVIOUS day's record with the daily_km
-        if (dailyKm > 0 && prevReading) {
-          console.log(`[tesla-mileage] Updating previous day (${prevReading.reading_date}) with ${dailyKm} km driven`);
-          
+            if (backfillError) {
+              console.error('[tesla-mileage] Backfill failed for', cursor, backfillError);
+              break;
+            }
+
+            cursor = addDays(cursor, 1);
+          }
+        }
+
+        // Determine yesterday (the day we attribute distance to)
+        const yesterday = addDays(today, -1);
+
+        // Fetch yesterday's snapshot (after backfill). If missing, fall back to lastReading.
+        const { data: prevSnapshot } = await supabase
+          .from('mileage_readings')
+          .select('odometer_km, reading_date, metadata')
+          .eq('vehicle_id', vehicle.id)
+          .eq('reading_date', yesterday)
+          .maybeSingle();
+
+        const baseSnapshot = prevSnapshot || lastReading;
+        const dailyKm = baseSnapshot ? Math.max(0, odometerKm - baseSnapshot.odometer_km) : 0;
+
+        // Update yesterday (or last known snapshot) with start/end + km.
+        if (dailyKm > 0 && baseSnapshot?.reading_date) {
+          console.log(
+            `[tesla-mileage] Updating day (${baseSnapshot.reading_date}) with ${dailyKm} km driven (start ${baseSnapshot.odometer_km} → end ${odometerKm})`
+          );
+
+          const mergedMetadata = {
+            ...(baseSnapshot.metadata || {}),
+            updated_at: now.toISOString(),
+            start_odometer_km: baseSnapshot.odometer_km,
+            end_odometer_km: odometerKm,
+            latitude,
+            longitude,
+            location_name: locationName,
+          };
+
           const { error: updateError } = await supabase
             .from('mileage_readings')
-            .update({ 
+            .update({
               daily_km: dailyKm,
-              metadata: {
-                updated_at: now.toISOString(),
-                end_odometer_km: odometerKm,
-                latitude,
-                longitude,
-                location_name: locationName,
-              }
+              metadata: mergedMetadata,
+              // store best-known location on the row as well
+              location_name: locationName,
             })
             .eq('vehicle_id', vehicle.id)
-            .eq('reading_date', prevReading.reading_date);
+            .eq('reading_date', baseSnapshot.reading_date);
 
           if (updateError) {
-            console.error(`[tesla-mileage] Failed to update previous reading:`, updateError);
+            console.error('[tesla-mileage] Failed to update day bucket:', updateError);
           }
         }
 
         // UPSERT today's reading (snapshot of current odometer)
         const { error: upsertError } = await supabase
           .from('mileage_readings')
-          .upsert({
-            vehicle_id: vehicle.id,
-            user_id: user.id,
-            reading_date: today,
-            odometer_km: odometerKm,
-            daily_km: 0,
-            location_name: locationName,
-            metadata: {
-              synced_at: now.toISOString(),
-              latitude,
-              longitude,
+          .upsert(
+            {
+              vehicle_id: vehicle.id,
+              user_id: user.id,
+              reading_date: today,
+              odometer_km: odometerKm,
+              daily_km: 0,
+              location_name: locationName,
+              metadata: {
+                synced_at: now.toISOString(),
+                latitude,
+                longitude,
+                location_name: locationName,
+              },
+            },
+            {
+              onConflict: 'vehicle_id,reading_date',
             }
-          }, {
-            onConflict: 'vehicle_id,reading_date',
-          });
+          );
 
         if (upsertError) {
           console.error(`[tesla-mileage] Failed to upsert mileage for vehicle ${vehicle.tesla_vehicle_id}:`, upsertError);
