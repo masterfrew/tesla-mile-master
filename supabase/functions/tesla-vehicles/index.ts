@@ -8,6 +8,129 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Helper function to get and migrate tokens
+async function getTokensWithFallback(
+  supabase: any,
+  userId: string
+): Promise<{ accessToken: string | null; refreshToken: string | null; expiresAt: Date | null; migrated: boolean }> {
+  
+  // First, try to get encrypted tokens
+  const { data: encryptedTokenData, error: encryptedError } = await supabase
+    .from('encrypted_tesla_tokens')
+    .select('encrypted_access_token, encrypted_refresh_token, token_expires_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (encryptedTokenData?.encrypted_access_token) {
+    console.log('[tesla-vehicles] Found encrypted tokens');
+    try {
+      const accessToken = await decryptToken(encryptedTokenData.encrypted_access_token);
+      const refreshToken = encryptedTokenData.encrypted_refresh_token 
+        ? await decryptToken(encryptedTokenData.encrypted_refresh_token)
+        : null;
+      const expiresAt = encryptedTokenData.token_expires_at 
+        ? new Date(encryptedTokenData.token_expires_at) 
+        : null;
+      return { accessToken, refreshToken, expiresAt, migrated: false };
+    } catch (error) {
+      console.error('[tesla-vehicles] Failed to decrypt tokens:', error);
+    }
+  }
+
+  // Fallback: check profiles table for plaintext tokens
+  console.log('[tesla-vehicles] No encrypted tokens found, checking profiles table for migration...');
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('tesla_access_token, tesla_refresh_token, tesla_token_expires_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (profileError || !profile?.tesla_access_token) {
+    console.log('[tesla-vehicles] No tokens found in profiles table either');
+    return { accessToken: null, refreshToken: null, expiresAt: null, migrated: false };
+  }
+
+  console.log('[tesla-vehicles] Found plaintext tokens in profiles, migrating to encrypted storage...');
+  
+  // Encrypt and migrate tokens
+  try {
+    const encryptedAccessToken = await encryptToken(profile.tesla_access_token);
+    const encryptedRefreshToken = profile.tesla_refresh_token 
+      ? await encryptToken(profile.tesla_refresh_token)
+      : null;
+    
+    // Store encrypted tokens
+    await supabase.rpc('store_encrypted_tesla_tokens', {
+      p_user_id: userId,
+      p_encrypted_access_token: encryptedAccessToken,
+      p_encrypted_refresh_token: encryptedRefreshToken,
+      p_expires_at: profile.tesla_token_expires_at
+    });
+
+    console.log('[tesla-vehicles] Token migration successful');
+    
+    return { 
+      accessToken: profile.tesla_access_token, 
+      refreshToken: profile.tesla_refresh_token,
+      expiresAt: profile.tesla_token_expires_at ? new Date(profile.tesla_token_expires_at) : null,
+      migrated: true 
+    };
+  } catch (error) {
+    console.error('[tesla-vehicles] Token migration failed:', error);
+    return { 
+      accessToken: profile.tesla_access_token, 
+      refreshToken: profile.tesla_refresh_token,
+      expiresAt: profile.tesla_token_expires_at ? new Date(profile.tesla_token_expires_at) : null,
+      migrated: false 
+    };
+  }
+}
+
+// Helper function to refresh tokens
+async function refreshAccessToken(
+  supabase: any,
+  userId: string,
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string
+): Promise<{ accessToken: string | null; error?: string }> {
+  console.log('[tesla-vehicles] Refreshing expired token...');
+  
+  const refreshResponse = await fetch('https://auth.tesla.com/oauth2/v3/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!refreshResponse.ok) {
+    const errorText = await refreshResponse.text();
+    console.error('[tesla-vehicles] Token refresh failed:', errorText);
+    return { accessToken: null, error: 'Token refresh failed' };
+  }
+
+  const tokens = await refreshResponse.json();
+  
+  // Encrypt and store refreshed tokens
+  const newExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
+  const encryptedAccessToken = await encryptToken(tokens.access_token);
+  const encryptedRefreshToken = await encryptToken(tokens.refresh_token);
+  
+  await supabase.rpc('store_encrypted_tesla_tokens', {
+    p_user_id: userId,
+    p_encrypted_access_token: encryptedAccessToken,
+    p_encrypted_refresh_token: encryptedRefreshToken,
+    p_expires_at: newExpiresAt
+  });
+
+  console.log('[tesla-vehicles] Token refreshed and stored successfully');
+  return { accessToken: tokens.access_token };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -30,6 +153,8 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const clientId = Deno.env.get('TESLA_CLIENT_ID');
+    const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const token = authHeader.replace('Bearer ', '');
@@ -48,15 +173,11 @@ serve(async (req) => {
 
     console.log('[tesla-vehicles] Getting tokens for user:', user.id);
 
-    // Get encrypted tokens
-    const { data: encryptedTokenData, error: tokenError } = await supabase
-      .from('encrypted_tesla_tokens')
-      .select('encrypted_access_token, encrypted_refresh_token, token_expires_at')
-      .eq('user_id', user.id)
-      .single();
+    // Get tokens with fallback migration
+    let { accessToken, refreshToken, expiresAt, migrated } = await getTokensWithFallback(supabase, user.id);
 
-    if (tokenError || !encryptedTokenData) {
-      console.error('[tesla-vehicles] Failed to get encrypted tokens:', tokenError);
+    if (!accessToken) {
+      console.error('[tesla-vehicles] No Tesla tokens found');
       return new Response(
         JSON.stringify({ 
           error: 'no_token',
@@ -66,40 +187,13 @@ serve(async (req) => {
       );
     }
 
-    if (!encryptedTokenData.encrypted_access_token) {
-      console.error('[tesla-vehicles] No encrypted Tesla access token found');
-      return new Response(
-        JSON.stringify({ 
-          error: 'no_token',
-          message: 'Geen Tesla toegangstoken gevonden. Verbind je Tesla account opnieuw.'
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (migrated) {
+      console.log('[tesla-vehicles] Tokens were migrated from plaintext to encrypted storage');
     }
 
-    // Decrypt access token
-    let accessToken: string;
-    try {
-      accessToken = await decryptToken(encryptedTokenData.encrypted_access_token);
-    } catch (error) {
-      console.error('[tesla-vehicles] Failed to decrypt access token:', error);
-      return new Response(
-        JSON.stringify({ 
-          error: 'decryption_failed',
-          message: 'Kon token niet ontsleutelen. Verbind je Tesla account opnieuw.'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const expiresAt = encryptedTokenData.token_expires_at ? new Date(encryptedTokenData.token_expires_at) : null;
-    
-    // Check if token is expired
+    // Check if token is expired and refresh if needed
     if (expiresAt && expiresAt < new Date()) {
-      console.log('[tesla-vehicles] Token expired, attempting refresh...');
-      
-      if (!encryptedTokenData.encrypted_refresh_token) {
-        console.error('[tesla-vehicles] No refresh token available');
+      if (!refreshToken) {
         return new Response(
           JSON.stringify({ 
             error: 'token_expired',
@@ -108,25 +202,6 @@ serve(async (req) => {
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-
-      // Decrypt refresh token
-      let refreshToken: string;
-      try {
-        refreshToken = await decryptToken(encryptedTokenData.encrypted_refresh_token);
-      } catch (error) {
-        console.error('[tesla-vehicles] Failed to decrypt refresh token:', error);
-        return new Response(
-          JSON.stringify({ 
-            error: 'decryption_failed',
-            message: 'Kon refresh token niet ontsleutelen. Verbind je Tesla account opnieuw.'
-          }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      // Refresh the token
-      const clientId = Deno.env.get('TESLA_CLIENT_ID');
-      const clientSecret = Deno.env.get('TESLA_CLIENT_SECRET');
 
       if (!clientId || !clientSecret) {
         return new Response(
@@ -138,20 +213,8 @@ serve(async (req) => {
         );
       }
 
-      const refreshResponse = await fetch('https://auth.tesla.com/oauth2/v3/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: refreshToken,
-        }),
-      });
-
-      if (!refreshResponse.ok) {
-        const errorText = await refreshResponse.text();
-        console.error('[tesla-vehicles] Token refresh failed:', errorText);
+      const refreshResult = await refreshAccessToken(supabase, user.id, refreshToken, clientId, clientSecret);
+      if (!refreshResult.accessToken) {
         return new Response(
           JSON.stringify({ 
             error: 'refresh_failed',
@@ -160,23 +223,7 @@ serve(async (req) => {
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-
-      const tokens = await refreshResponse.json();
-      accessToken = tokens.access_token;
-
-      // Encrypt and store refreshed tokens
-      const newExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
-      const encryptedAccessToken = await encryptToken(tokens.access_token);
-      const encryptedRefreshToken = await encryptToken(tokens.refresh_token);
-      
-      await supabase.rpc('store_encrypted_tesla_tokens', {
-        p_user_id: user.id,
-        p_encrypted_access_token: encryptedAccessToken,
-        p_encrypted_refresh_token: encryptedRefreshToken,
-        p_expires_at: newExpiresAt
-      });
-
-      console.log('[tesla-vehicles] Token refreshed successfully');
+      accessToken = refreshResult.accessToken;
     }
 
     console.log('[tesla-vehicles] Fetching vehicles from Tesla API...');
@@ -195,14 +242,12 @@ serve(async (req) => {
     if (!vehiclesResponse.ok) {
       const errorText = await vehiclesResponse.text();
       console.error('[tesla-vehicles] Tesla API error:', vehiclesResponse.status, errorText);
-      console.error('[tesla-vehicles] Tesla API base URL used:', teslaApiBaseUrl);
       
       return new Response(
         JSON.stringify({ 
           error: 'api_error',
           message: `Tesla API fout (${vehiclesResponse.status})`,
-          details: errorText,
-          apiUrl: teslaApiBaseUrl
+          details: errorText
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -225,15 +270,14 @@ serve(async (req) => {
       );
     }
 
-    // Validate and store vehicles in database
+    // Store vehicles in database
     let storedCount = 0;
     const errors = [];
 
     for (const vehicle of vehicles) {
       try {
-        // Validate required fields
         if (!vehicle.id || !vehicle.vin) {
-          console.error('[tesla-vehicles] Invalid vehicle data - missing id or vin:', vehicle);
+          console.error('[tesla-vehicles] Invalid vehicle data:', vehicle);
           errors.push(`Vehicle ${vehicle.display_name || 'unknown'}: missing required data`);
           continue;
         }
