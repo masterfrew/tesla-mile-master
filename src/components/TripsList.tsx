@@ -166,16 +166,61 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
   };
 
   const exportToCSV = () => {
+    const header = [
+      'Datum',
+      'Tijdstip',
+      'Voertuig',
+      'VIN',
+      'Kilometers',
+      'Start km-stand',
+      'Eind km-stand',
+      'Locatie (laatst gemeten)',
+      'Latitude',
+      'Longitude',
+      'Google Maps link',
+      'Doel',
+      'Beschrijving',
+      'Synthetisch (gap-fill)'
+    ].join(',');
+
     const csvContent = [
-      'Datum,Tijdstip,Voertuig,VIN,Kilometers,Start km-stand,Eind km-stand,Locatie,Latitude,Longitude,Doel,Beschrijving',
+      header,
       ...trips.map(trip => {
         const purpose = trip.metadata?.purpose === 'business' ? 'Zakelijk' : 'Privé';
-        const description = trip.metadata?.description || '';
+        const escapeCsv = (v: unknown) => String(v ?? '').split('"').join('""');
+
+        const description = escapeCsv(trip.metadata?.description || '');
         const time = trip.metadata?.synced_at ? formatTime(trip.metadata.synced_at) : '';
-        const lat = trip.metadata?.latitude || '';
-        const lng = trip.metadata?.longitude || '';
-        const startOdo = trip.odometer_km - (trip.daily_km || 0);
-        return `${trip.reading_date},"${time}","${trip.vehicle?.display_name || 'Onbekend'}","",${trip.daily_km},${startOdo},${trip.odometer_km},"${trip.location_name || ''}",${lat},${lng},"${purpose}","${description}"`;
+        const lat = trip.metadata?.latitude ?? '';
+        const lng = trip.metadata?.longitude ?? '';
+
+        const endOdo = Number(trip.metadata?.end_odometer_km ?? trip.odometer_km);
+        const startOdo = Number(
+          trip.metadata?.start_odometer_km ??
+            (trip.metadata?.end_odometer_km ? trip.odometer_km : trip.odometer_km - (trip.daily_km || 0))
+        );
+        const km = Math.max(0, endOdo - startOdo);
+
+        const location = escapeCsv(trip.location_name || trip.metadata?.location_name || '');
+        const mapsLink = lat && lng ? `https://www.google.com/maps?q=${lat},${lng}` : '';
+        const isSynthetic = trip.metadata?.synthetic ? 'ja' : 'nee';
+
+        return [
+          trip.reading_date,
+          `"${time || ''}"`,
+          `"${escapeCsv(trip.vehicle?.display_name || 'Onbekend')}"`,
+          `""`,
+          km,
+          startOdo,
+          endOdo,
+          `"${location}"`,
+          lat,
+          lng,
+          `"${mapsLink}"`,
+          `"${purpose}"`,
+          `"${description}"`,
+          `"${isSynthetic}"`
+        ].join(',');
       })
     ].join('\n');
 
@@ -188,7 +233,7 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
+
     toast.success('Export gedownload!');
   };
 
