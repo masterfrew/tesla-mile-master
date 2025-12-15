@@ -11,6 +11,15 @@ const corsHeaders = {
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
+// Date helpers (work in UTC date strings: YYYY-MM-DD)
+const toDateStr = (d: Date) => d.toISOString().split('T')[0];
+const parseDateStr = (s: string) => new Date(`${s}T00:00:00.000Z`);
+const addDays = (s: string, days: number) => {
+  const d = parseDateStr(s);
+  d.setUTCDate(d.getUTCDate() + days);
+  return toDateStr(d);
+};
+
 function isVehicleOfflineError(status: number, errorText: string): boolean {
   const offlineIndicators = [
     'vehicle unavailable', 'vehicle is offline', 'timeout', 'asleep', 'could not wake', '408', '504'
@@ -194,29 +203,117 @@ async function syncUserVehicles(
       }
 
       const odometerKm = Math.round(odometerMiles * 1.60934);
-      const today = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const today = toDateStr(now);
+      const yesterday = addDays(today, -1);
 
-      const { data: prevReading } = await supabase
+      const driveState = result.data?.response?.drive_state;
+      const locationName = driveState?.active_route_destination || null;
+      const latitude = driveState?.latitude || null;
+      const longitude = driveState?.longitude || null;
+
+      // Get the most recent reading to calculate + backfill gaps
+      const { data: lastReading } = await supabase
         .from('mileage_readings')
-        .select('odometer_km')
+        .select('odometer_km, reading_date, metadata')
         .eq('vehicle_id', vehicle.id)
         .order('reading_date', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      const dailyKm = prevReading ? Math.max(0, odometerKm - prevReading.odometer_km) : 0;
+      // Backfill missing days (0 km) so the UI/export stays continuous
+      if (lastReading?.reading_date) {
+        let cursor = addDays(lastReading.reading_date, 1);
+        while (cursor < today) {
+          const { error: backfillError } = await supabase
+            .from('mileage_readings')
+            .upsert(
+              {
+                vehicle_id: vehicle.id,
+                user_id: userId,
+                reading_date: cursor,
+                odometer_km: lastReading.odometer_km,
+                daily_km: 0,
+                location_name: null,
+                metadata: {
+                  ...(lastReading.metadata || {}),
+                  synthetic: true,
+                  synthetic_reason: 'gap_fill',
+                  synced_at: now.toISOString(),
+                },
+              },
+              { onConflict: 'vehicle_id,reading_date' }
+            );
 
+          if (backfillError) {
+            console.error('[tesla-sync-all] Backfill failed for', cursor, backfillError);
+            break;
+          }
+
+          cursor = addDays(cursor, 1);
+        }
+      }
+
+      // Fetch yesterday's snapshot (after backfill). If missing, fall back to lastReading.
+      const { data: prevSnapshot } = await supabase
+        .from('mileage_readings')
+        .select('odometer_km, reading_date, metadata')
+        .eq('vehicle_id', vehicle.id)
+        .eq('reading_date', yesterday)
+        .maybeSingle();
+
+      const baseSnapshot = prevSnapshot || lastReading;
+      const dailyKm = baseSnapshot ? Math.max(0, odometerKm - baseSnapshot.odometer_km) : 0;
+
+      // Update the attributed day (yesterday or last snapshot) with start/end + km.
+      if (dailyKm > 0 && baseSnapshot?.reading_date) {
+        const mergedMetadata = {
+          ...(baseSnapshot.metadata || {}),
+          updated_at: now.toISOString(),
+          start_odometer_km: baseSnapshot.odometer_km,
+          end_odometer_km: odometerKm,
+          latitude,
+          longitude,
+          location_name: locationName,
+        };
+
+        const { error: updateError } = await supabase
+          .from('mileage_readings')
+          .update({
+            daily_km: dailyKm,
+            // Make the row consistent: odometer_km represents END of the period
+            odometer_km: odometerKm,
+            metadata: mergedMetadata,
+            location_name: locationName,
+          })
+          .eq('vehicle_id', vehicle.id)
+          .eq('reading_date', baseSnapshot.reading_date);
+
+        if (updateError) {
+          console.error('[tesla-sync-all] Failed to update day bucket:', updateError);
+        }
+      }
+
+      // UPSERT today's reading as a snapshot of current odometer
       const { error: upsertError } = await supabase
         .from('mileage_readings')
-        .upsert({
-          vehicle_id: vehicle.id,
-          user_id: userId,
-          reading_date: today,
-          odometer_km: odometerKm,
-          daily_km: dailyKm,
-        }, {
-          onConflict: 'vehicle_id,reading_date',
-        });
+        .upsert(
+          {
+            vehicle_id: vehicle.id,
+            user_id: userId,
+            reading_date: today,
+            odometer_km: odometerKm,
+            daily_km: 0,
+            location_name: locationName,
+            metadata: {
+              synced_at: now.toISOString(),
+              latitude,
+              longitude,
+              location_name: locationName,
+            },
+          },
+          { onConflict: 'vehicle_id,reading_date' }
+        );
 
       if (upsertError) {
         failed++;
@@ -228,7 +325,7 @@ async function syncUserVehicles(
         await logAuditEvent(supabase, userId, 'MILEAGE_SYNC', 'vehicle', vehicle.id, {
           odometer_km: odometerKm,
           daily_km: dailyKm,
-          reading_date: today
+          reading_date: baseSnapshot?.reading_date || today,
         });
       }
 

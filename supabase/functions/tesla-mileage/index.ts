@@ -394,6 +394,8 @@ serve(async (req) => {
             .from('mileage_readings')
             .update({
               daily_km: dailyKm,
+              // Make the row consistent: odometer_km represents END of the period
+              odometer_km: odometerKm,
               metadata: mergedMetadata,
               // store best-known location on the row as well
               location_name: locationName,
