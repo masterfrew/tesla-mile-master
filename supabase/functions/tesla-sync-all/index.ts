@@ -10,6 +10,8 @@ const corsHeaders = {
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
+const WAKE_TIMEOUT_MS = 60000; // 60 seconds max for wake-up
+const WAKE_POLL_INTERVAL_MS = 3000; // Check every 3 seconds
 
 // Date helpers (work in UTC date strings: YYYY-MM-DD)
 const toDateStr = (d: Date) => d.toISOString().split('T')[0];
@@ -20,6 +22,8 @@ const addDays = (s: string, days: number) => {
   return toDateStr(d);
 };
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 function isVehicleOfflineError(status: number, errorText: string): boolean {
   const offlineIndicators = [
     'vehicle unavailable', 'vehicle is offline', 'timeout', 'asleep', 'could not wake', '408', '504'
@@ -27,6 +31,74 @@ function isVehicleOfflineError(status: number, errorText: string): boolean {
   if (status === 408 || status === 504) return true;
   const lowerError = errorText.toLowerCase();
   return offlineIndicators.some(indicator => lowerError.includes(indicator.toLowerCase()));
+}
+
+// Wake up vehicle and wait until online
+async function wakeUpVehicle(
+  teslaApiBaseUrl: string,
+  vehicleId: string,
+  accessToken: string
+): Promise<{ success: boolean; error?: string }> {
+  console.log(`[tesla-sync-all] Waking up vehicle ${vehicleId}...`);
+  
+  const startTime = Date.now();
+  
+  // Send wake_up command
+  try {
+    const wakeResponse = await fetch(
+      `${teslaApiBaseUrl}/api/1/vehicles/${vehicleId}/wake_up`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (!wakeResponse.ok) {
+      const errorText = await wakeResponse.text();
+      console.error(`[tesla-sync-all] Wake-up command failed:`, errorText);
+    } else {
+      console.log('[tesla-sync-all] Wake-up command sent successfully');
+    }
+  } catch (error) {
+    console.error('[tesla-sync-all] Wake-up request failed:', error);
+  }
+
+  // Poll until vehicle is online or timeout
+  while (Date.now() - startTime < WAKE_TIMEOUT_MS) {
+    try {
+      const statusResponse = await fetch(
+        `${teslaApiBaseUrl}/api/1/vehicles/${vehicleId}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        const state = statusData.response?.state;
+        console.log(`[tesla-sync-all] Vehicle state: ${state}`);
+        
+        if (state === 'online') {
+          console.log(`[tesla-sync-all] Vehicle ${vehicleId} is now online`);
+          return { success: true };
+        }
+      }
+    } catch (error) {
+      console.error('[tesla-sync-all] Status check failed:', error);
+    }
+
+    console.log(`[tesla-sync-all] Vehicle not online yet, waiting ${WAKE_POLL_INTERVAL_MS}ms...`);
+    await sleep(WAKE_POLL_INTERVAL_MS);
+  }
+
+  console.error(`[tesla-sync-all] Vehicle ${vehicleId} did not wake up within ${WAKE_TIMEOUT_MS}ms`);
+  return { success: false, error: 'Vehicle did not wake up in time' };
 }
 
 async function fetchVehicleDataWithRetry(
@@ -59,7 +131,7 @@ async function fetchVehicleDataWithRetry(
       
       if (isOffline && attempt < retries) {
         console.log(`[tesla-sync-all] Vehicle ${vehicleId} appears offline, retrying in ${RETRY_DELAY_MS}ms...`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        await sleep(RETRY_DELAY_MS);
         continue;
       }
       
@@ -70,7 +142,7 @@ async function fetchVehicleDataWithRetry(
       
       if (attempt < retries) {
         console.log(`[tesla-sync-all] Request failed, retrying... Error: ${errorMsg}`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        await sleep(RETRY_DELAY_MS);
         continue;
       }
       
@@ -146,6 +218,51 @@ async function logAuditEvent(
   }
 }
 
+// Backfill missing days with synthetic entries
+async function backfillMissingDays(
+  supabase: any,
+  vehicleId: string,
+  userId: string,
+  lastReading: { odometer_km: number; reading_date: string; metadata?: any } | null,
+  today: string,
+  now: Date
+): Promise<void> {
+  if (!lastReading?.reading_date) return;
+  
+  let cursor = addDays(lastReading.reading_date, 1);
+  while (cursor < today) {
+    console.log(`[tesla-sync-all] Backfilling ${cursor} with 0 km (synthetic)`);
+    
+    const { error: backfillError } = await supabase
+      .from('mileage_readings')
+      .upsert(
+        {
+          vehicle_id: vehicleId,
+          user_id: userId,
+          reading_date: cursor,
+          odometer_km: lastReading.odometer_km,
+          daily_km: 0,
+          location_name: null,
+          metadata: {
+            synthetic: true,
+            synthetic_reason: 'gap_fill',
+            synced_at: now.toISOString(),
+            start_odometer_km: lastReading.odometer_km,
+            end_odometer_km: lastReading.odometer_km,
+          },
+        },
+        { onConflict: 'vehicle_id,reading_date' }
+      );
+
+    if (backfillError) {
+      console.error('[tesla-sync-all] Backfill failed for', cursor, backfillError);
+      break;
+    }
+
+    cursor = addDays(cursor, 1);
+  }
+}
+
 async function syncUserVehicles(
   supabase: any,
   userId: string,
@@ -168,12 +285,39 @@ async function syncUserVehicles(
     return { synced: 0, failed: 0, offline: 0, errors: [] };
   }
 
+  const now = new Date();
+  const today = toDateStr(now);
+
   for (const vehicle of vehicles) {
     const vehicleName = vehicle.display_name || vehicle.vin;
     
     try {
-      console.log(`[tesla-sync-all] Fetching data for vehicle ${vehicle.tesla_vehicle_id} (${vehicleName})`);
+      console.log(`[tesla-sync-all] Processing vehicle ${vehicle.tesla_vehicle_id} (${vehicleName})`);
       
+      // Get the most recent reading FIRST (for backfill, even if API fails)
+      const { data: lastReading } = await supabase
+        .from('mileage_readings')
+        .select('odometer_km, reading_date, metadata')
+        .eq('vehicle_id', vehicle.id)
+        .order('reading_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // ALWAYS backfill missing days (even before trying API)
+      await backfillMissingDays(supabase, vehicle.id, userId, lastReading, today, now);
+
+      // Wake up vehicle first
+      const wakeResult = await wakeUpVehicle(teslaApiBaseUrl, vehicle.tesla_vehicle_id, accessToken);
+      
+      if (!wakeResult.success) {
+        console.warn(`[tesla-sync-all] Vehicle ${vehicleName} could not be woken up`);
+        offline++;
+        errors.push(`${vehicleName}: Vehicle offline/asleep`);
+        await updateSyncStatus(supabase, vehicle.id, userId, false, true, wakeResult.error);
+        continue;
+      }
+
+      // Now fetch vehicle data with retries
       const result = await fetchVehicleDataWithRetry(
         teslaApiBaseUrl,
         vehicle.tesla_vehicle_id,
@@ -203,8 +347,6 @@ async function syncUserVehicles(
       }
 
       const odometerKm = Math.round(odometerMiles * 1.60934);
-      const now = new Date();
-      const today = toDateStr(now);
       const yesterday = addDays(today, -1);
 
       const driveState = result.data?.response?.drive_state;
@@ -212,49 +354,7 @@ async function syncUserVehicles(
       const latitude = driveState?.latitude || null;
       const longitude = driveState?.longitude || null;
 
-      // Get the most recent reading to calculate + backfill gaps
-      const { data: lastReading } = await supabase
-        .from('mileage_readings')
-        .select('odometer_km, reading_date, metadata')
-        .eq('vehicle_id', vehicle.id)
-        .order('reading_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // Backfill missing days (0 km) so the UI/export stays continuous
-      if (lastReading?.reading_date) {
-        let cursor = addDays(lastReading.reading_date, 1);
-        while (cursor < today) {
-          const { error: backfillError } = await supabase
-            .from('mileage_readings')
-            .upsert(
-              {
-                vehicle_id: vehicle.id,
-                user_id: userId,
-                reading_date: cursor,
-                odometer_km: lastReading.odometer_km,
-                daily_km: 0,
-                location_name: null,
-                metadata: {
-                  ...(lastReading.metadata || {}),
-                  synthetic: true,
-                  synthetic_reason: 'gap_fill',
-                  synced_at: now.toISOString(),
-                },
-              },
-              { onConflict: 'vehicle_id,reading_date' }
-            );
-
-          if (backfillError) {
-            console.error('[tesla-sync-all] Backfill failed for', cursor, backfillError);
-            break;
-          }
-
-          cursor = addDays(cursor, 1);
-        }
-      }
-
-      // Fetch yesterday's snapshot (after backfill). If missing, fall back to lastReading.
+      // Re-fetch yesterday's snapshot (after backfill). If missing, fall back to lastReading.
       const { data: prevSnapshot } = await supabase
         .from('mileage_readings')
         .select('odometer_km, reading_date, metadata')
@@ -263,14 +363,20 @@ async function syncUserVehicles(
         .maybeSingle();
 
       const baseSnapshot = prevSnapshot || lastReading;
-      const dailyKm = baseSnapshot ? Math.max(0, odometerKm - baseSnapshot.odometer_km) : 0;
+      const baseOdometer = baseSnapshot?.odometer_km || 0;
+      const dailyKm = baseOdometer > 0 ? Math.max(0, odometerKm - baseOdometer) : 0;
 
-      // Update the attributed day (yesterday or last snapshot) with start/end + km.
+      // Update the attributed day (yesterday or last snapshot) with start/end + km if there was driving.
       if (dailyKm > 0 && baseSnapshot?.reading_date) {
+        console.log(
+          `[tesla-sync-all] Updating day (${baseSnapshot.reading_date}) with ${dailyKm} km driven (start ${baseOdometer} → end ${odometerKm})`
+        );
+
         const mergedMetadata = {
           ...(baseSnapshot.metadata || {}),
+          synthetic: false,
           updated_at: now.toISOString(),
-          start_odometer_km: baseSnapshot.odometer_km,
+          start_odometer_km: baseOdometer,
           end_odometer_km: odometerKm,
           latitude,
           longitude,
@@ -281,8 +387,7 @@ async function syncUserVehicles(
           .from('mileage_readings')
           .update({
             daily_km: dailyKm,
-            // Make the row consistent: odometer_km represents END of the period
-            odometer_km: odometerKm,
+            odometer_km: odometerKm, // END of the period
             metadata: mergedMetadata,
             location_name: locationName,
           })
@@ -303,13 +408,15 @@ async function syncUserVehicles(
             user_id: userId,
             reading_date: today,
             odometer_km: odometerKm,
-            daily_km: 0,
+            daily_km: 0, // Will be updated tomorrow
             location_name: locationName,
             metadata: {
               synced_at: now.toISOString(),
               latitude,
               longitude,
               location_name: locationName,
+              start_odometer_km: odometerKm,
+              end_odometer_km: odometerKm,
             },
           },
           { onConflict: 'vehicle_id,reading_date' }
@@ -510,8 +617,8 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get users from both encrypted_tesla_tokens AND profiles tables
-    const { data: encryptedTokenUsers } = await supabase
+    // Get all users with Tesla tokens (from encrypted_tesla_tokens OR profiles)
+    const { data: encryptedUsers } = await supabase
       .from('encrypted_tesla_tokens')
       .select('user_id')
       .not('encrypted_access_token', 'is', null);
@@ -521,53 +628,35 @@ serve(async (req) => {
       .select('user_id')
       .not('tesla_access_token', 'is', null);
 
-    // Combine and deduplicate user IDs
+    // Combine unique user IDs
     const userIds = new Set<string>();
-    encryptedTokenUsers?.forEach(u => userIds.add(u.user_id));
+    encryptedUsers?.forEach(u => userIds.add(u.user_id));
     profileUsers?.forEach(u => userIds.add(u.user_id));
-
-    if (userIds.size === 0) {
-      console.log('[tesla-sync-all] No users with Tesla tokens found');
-      return new Response(
-        JSON.stringify({ success: true, message: 'No users to sync', total_users: 0, synced_vehicles: 0 }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
     console.log(`[tesla-sync-all] Found ${userIds.size} users with Tesla tokens`);
 
     let totalSynced = 0;
     let totalFailed = 0;
     let totalOffline = 0;
-    let usersProcessed = 0;
-    let usersFailed = 0;
-    let tokensRefreshed = 0;
     const allErrors: string[] = [];
 
     for (const userId of userIds) {
       try {
         console.log(`[tesla-sync-all] Processing user ${userId}`);
         
-        // Get tokens with fallback migration
         const { accessToken, refreshToken, expiresAt } = await getTokensWithFallback(supabase, userId);
         
         if (!accessToken) {
           console.log(`[tesla-sync-all] No valid tokens for user ${userId}`);
-          usersFailed++;
           continue;
         }
 
         const { token: validToken, refreshed } = await getValidAccessToken(
           supabase, userId, accessToken, refreshToken, expiresAt, clientId, clientSecret
         );
-        
-        if (refreshed) tokensRefreshed++;
-        
+
         if (!validToken) {
           console.error(`[tesla-sync-all] Could not get valid token for user ${userId}`);
-          usersFailed++;
-          allErrors.push(`User ${userId.substring(0, 8)}...: Token invalid`);
-          await logAuditEvent(supabase, userId, 'SYNC_FAILED', 'user', userId, { reason: 'invalid_token' });
           continue;
         }
 
@@ -577,37 +666,28 @@ serve(async (req) => {
         totalFailed += result.failed;
         totalOffline += result.offline;
         allErrors.push(...result.errors);
-        usersProcessed++;
-        
-        if (result.synced > 0) {
-          await logAuditEvent(supabase, userId, 'SYNC_SUCCESS', 'user', userId, {
-            synced: result.synced, failed: result.failed, offline: result.offline
-          });
-        }
+
+        console.log(`[tesla-sync-all] User ${userId}: synced=${result.synced}, failed=${result.failed}, offline=${result.offline}`);
 
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         console.error(`[tesla-sync-all] Error processing user ${userId}:`, errorMsg);
-        usersFailed++;
-        allErrors.push(`User ${userId.substring(0, 8)}...: ${errorMsg}`);
+        allErrors.push(`User ${userId}: ${errorMsg}`);
       }
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[tesla-sync-all] Completed in ${duration}ms: ${usersProcessed} users, ${totalSynced} vehicles synced`);
+    console.log(`[tesla-sync-all] Completed in ${duration}ms: synced=${totalSynced}, failed=${totalFailed}, offline=${totalOffline}`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Sync completed: ${totalSynced} vehicles synced for ${usersProcessed} users`,
-        total_users: userIds.size,
-        users_processed: usersProcessed,
-        users_failed: usersFailed,
-        tokens_refreshed: tokensRefreshed,
-        synced_vehicles: totalSynced,
-        failed_vehicles: totalFailed,
-        offline_vehicles: totalOffline,
+        message: `Multi-user sync completed`,
         duration_ms: duration,
+        total_users: userIds.size,
+        synced: totalSynced,
+        failed: totalFailed,
+        offline: totalOffline,
         errors: allErrors.length > 0 ? allErrors : undefined
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -617,7 +697,7 @@ serve(async (req) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('[tesla-sync-all] FATAL_ERROR:', errorMessage);
     return new Response(
-      JSON.stringify({ error: 'server_error', message: 'Sync failed', details: errorMessage }),
+      JSON.stringify({ error: 'server_error', message: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

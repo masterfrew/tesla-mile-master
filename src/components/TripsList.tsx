@@ -323,23 +323,32 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
                       </div>
                       
                       {/* Main stats grid */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                        <div className="flex items-center gap-2">
-                          <Car className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">{trip.vehicle?.display_name || 'Onbekend'}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-lg font-semibold ${trip.daily_km > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                            {trip.daily_km} km
-                          </span>
-                        </div>
-                        <div className="text-muted-foreground">
-                          Start: {(trip.odometer_km - (trip.daily_km || 0)).toLocaleString()} km
-                        </div>
-                        <div className="text-muted-foreground">
-                          Eind: <span className="font-medium">{trip.odometer_km.toLocaleString()} km</span>
-                        </div>
-                      </div>
+                      {(() => {
+                        // Consistent calculation using metadata first, then fallback
+                        const endOdo = Number(trip.metadata?.end_odometer_km ?? trip.odometer_km);
+                        const startOdo = Number(trip.metadata?.start_odometer_km ?? (endOdo - (trip.daily_km || 0)));
+                        const km = Math.max(0, endOdo - startOdo);
+                        
+                        return (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+                            <div className="flex items-center gap-2">
+                              <Car className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-muted-foreground">{trip.vehicle?.display_name || 'Onbekend'}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-lg font-semibold ${km > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                                {km} km
+                              </span>
+                            </div>
+                            <div className="text-muted-foreground">
+                              Start: {startOdo.toLocaleString()} km
+                            </div>
+                            <div className="text-muted-foreground">
+                              Eind: <span className="font-medium">{endOdo.toLocaleString()} km</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Location info - more prominent */}
                       {(trip.location_name || trip.metadata?.latitude) && (
