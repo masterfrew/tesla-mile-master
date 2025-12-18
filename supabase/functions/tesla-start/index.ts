@@ -143,7 +143,7 @@ serve(async (req) => {
     authUrl.searchParams.append('client_id', clientId);
     authUrl.searchParams.append('redirect_uri', redirectUri);
     authUrl.searchParams.append('response_type', 'code');
-    authUrl.searchParams.append('scope', 'openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds');
+    authUrl.searchParams.append('scope', 'openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds vehicle_location');
     authUrl.searchParams.append('state', state);
     authUrl.searchParams.append('code_challenge', codeChallenge);
     authUrl.searchParams.append('code_challenge_method', 'S256');

@@ -22,6 +22,49 @@ const addDays = (s: string, days: number) => {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Reverse geocoding using OpenStreetMap Nominatim (free, no API key needed)
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+    const response = await fetch(url, {
+      headers: { 
+        'User-Agent': 'kmtrack.nl/1.0 (contact@kmtrack.nl)',
+        'Accept-Language': 'nl'
+      }
+    });
+    
+    if (!response.ok) {
+      console.log(`[tesla-mileage] Nominatim returned ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    // Build a readable address from components
+    const addr = data.address || {};
+    const parts = [];
+    
+    // Street + house number
+    if (addr.road) {
+      parts.push(addr.house_number ? `${addr.road} ${addr.house_number}` : addr.road);
+    }
+    
+    // City/town/village
+    const city = addr.city || addr.town || addr.village || addr.municipality;
+    if (city) parts.push(city);
+    
+    if (parts.length > 0) {
+      return parts.join(', ');
+    }
+    
+    // Fallback to display_name (full address)
+    return data.display_name?.split(',').slice(0, 3).join(',') || null;
+  } catch (error) {
+    console.error('[tesla-mileage] Reverse geocoding failed:', error);
+    return null;
+  }
+}
+
 // Helper function to get and migrate tokens
 async function getTokensWithFallback(
   supabase: any,
@@ -455,13 +498,20 @@ serve(async (req) => {
         // Convert miles to kilometers
         const odometerKm = Math.round(odometerMiles * 1.60934);
 
-        // Get location data from Tesla API if available
+        // Get location data from Tesla API
         const driveState = vehicleData.response?.drive_state;
-        const locationName = driveState?.active_route_destination || null;
         const latitude = driveState?.latitude || null;
         const longitude = driveState?.longitude || null;
+        
+        // Reverse geocode coordinates to get a readable address
+        let locationName: string | null = null;
+        if (latitude && longitude) {
+          console.log(`[tesla-mileage] Reverse geocoding coordinates: ${latitude}, ${longitude}`);
+          locationName = await reverseGeocode(latitude, longitude);
+          console.log(`[tesla-mileage] Geocoded location: ${locationName}`);
+        }
 
-        console.log(`[tesla-mileage] Vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km, location: ${latitude}, ${longitude}`);
+        console.log(`[tesla-mileage] Vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km, location: ${locationName || 'unknown'} (${latitude}, ${longitude})`);
 
         // Determine yesterday (the day we attribute distance to)
         const yesterday = addDays(today, -1);

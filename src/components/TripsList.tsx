@@ -174,7 +174,8 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
       'Kilometers',
       'Start km-stand',
       'Eind km-stand',
-      'Locatie (laatst gemeten)',
+      'Start locatie',
+      'Eind locatie',
       'Latitude',
       'Longitude',
       'Google Maps link',
@@ -201,7 +202,8 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
         );
         const km = Math.max(0, endOdo - startOdo);
 
-        const location = escapeCsv(trip.location_name || trip.metadata?.location_name || '');
+        const startLocation = escapeCsv(trip.metadata?.start_location || '');
+        const endLocation = escapeCsv(trip.location_name || trip.metadata?.location_name || trip.metadata?.end_location || '');
         const mapsLink = lat && lng ? `https://www.google.com/maps?q=${lat},${lng}` : '';
         const isSynthetic = trip.metadata?.synthetic ? 'ja' : 'nee';
 
@@ -213,7 +215,8 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
           km,
           startOdo,
           endOdo,
-          `"${location}"`,
+          `"${startLocation}"`,
+          `"${endLocation}"`,
           lat,
           lng,
           `"${mapsLink}"`,
@@ -350,23 +353,30 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
                         );
                       })()}
 
-                      {/* Location info - more prominent */}
-                      {(trip.location_name || trip.metadata?.latitude) && (
-                        <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md text-sm">
-                          <MapPin className="h-4 w-4 text-primary flex-shrink-0" />
-                          <span className="text-foreground">
-                            {trip.location_name || 'Locatie beschikbaar'}
-                          </span>
-                          {trip.metadata?.latitude && trip.metadata?.longitude && (
-                            <a 
-                              href={`https://www.google.com/maps?q=${trip.metadata.latitude},${trip.metadata.longitude}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="ml-auto flex items-center gap-1 text-primary hover:underline font-medium"
-                            >
-                              <Navigation className="h-4 w-4" />
-                              Kaart
-                            </a>
+                      {/* Location info - Van → Naar display */}
+                      {(trip.location_name || trip.metadata?.location_name || trip.metadata?.latitude) && (
+                        <div className="flex flex-col gap-1 p-2 bg-muted/50 rounded-md text-sm">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-primary flex-shrink-0" />
+                            <span className="text-foreground">
+                              {trip.location_name || trip.metadata?.location_name || 'Locatie beschikbaar'}
+                            </span>
+                            {trip.metadata?.latitude && trip.metadata?.longitude && (
+                              <a 
+                                href={`https://www.google.com/maps?q=${trip.metadata.latitude},${trip.metadata.longitude}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto flex items-center gap-1 text-primary hover:underline font-medium"
+                              >
+                                <Navigation className="h-4 w-4" />
+                                Kaart
+                              </a>
+                            )}
+                          </div>
+                          {trip.metadata?.start_location && trip.metadata?.start_location !== trip.location_name && (
+                            <div className="text-xs text-muted-foreground ml-6">
+                              Van: {trip.metadata.start_location}
+                            </div>
                           )}
                         </div>
                       )}
