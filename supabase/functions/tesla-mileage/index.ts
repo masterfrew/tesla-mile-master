@@ -470,7 +470,7 @@ serve(async (req) => {
         console.log(`[tesla-mileage] Fetching data for vehicle ${vehicle.tesla_vehicle_id} (${vehicleName})`);
         
         const vehicleDataResponse = await fetch(
-          `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data`,
+          `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data?location_data=true`,
           {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
@@ -534,6 +534,7 @@ serve(async (req) => {
             `[tesla-mileage] Updating day (${baseSnapshot.reading_date}) with ${dailyKm} km driven (start ${baseOdometer} → end ${odometerKm})`
           );
 
+          const startLocationForDay = (baseSnapshot.metadata?.start_location ?? baseSnapshot.metadata?.location_name ?? null) as string | null;
           const mergedMetadata = {
             ...(baseSnapshot.metadata || {}),
             synthetic: false,
@@ -543,6 +544,8 @@ serve(async (req) => {
             latitude,
             longitude,
             location_name: locationName,
+            start_location: startLocationForDay,
+            end_location: locationName,
           };
 
           const { error: updateError } = await supabase
@@ -562,6 +565,15 @@ serve(async (req) => {
         }
 
         // UPSERT today's reading (snapshot of current odometer)
+        const { data: todayExisting } = await supabase
+          .from('mileage_readings')
+          .select('metadata')
+          .eq('vehicle_id', vehicle.id)
+          .eq('reading_date', today)
+          .maybeSingle();
+
+        const preservedStartLocation = (todayExisting?.metadata?.start_location ?? locationName) as string | null;
+
         const { error: upsertError } = await supabase
           .from('mileage_readings')
           .upsert(
@@ -573,10 +585,13 @@ serve(async (req) => {
               daily_km: 0, // Will be updated tomorrow when we know how much was driven
               location_name: locationName,
               metadata: {
+                ...(todayExisting?.metadata || {}),
                 synced_at: now.toISOString(),
                 latitude,
                 longitude,
                 location_name: locationName,
+                start_location: preservedStartLocation,
+                end_location: locationName,
                 start_odometer_km: odometerKm,
                 end_odometer_km: odometerKm, // Same for now, will be updated next sync
               },
