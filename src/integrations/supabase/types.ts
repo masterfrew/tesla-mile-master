@@ -223,6 +223,80 @@ export type Database = {
         }
         Relationships: []
       }
+      trips: {
+        Row: {
+          created_at: string
+          description: string | null
+          end_lat: number | null
+          end_location: string | null
+          end_lon: number | null
+          end_odometer_km: number | null
+          ended_at: string | null
+          id: string
+          is_manual: boolean | null
+          metadata: Json | null
+          purpose: string | null
+          start_lat: number | null
+          start_location: string | null
+          start_lon: number | null
+          start_odometer_km: number
+          started_at: string
+          updated_at: string
+          user_id: string
+          vehicle_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          end_lat?: number | null
+          end_location?: string | null
+          end_lon?: number | null
+          end_odometer_km?: number | null
+          ended_at?: string | null
+          id?: string
+          is_manual?: boolean | null
+          metadata?: Json | null
+          purpose?: string | null
+          start_lat?: number | null
+          start_location?: string | null
+          start_lon?: number | null
+          start_odometer_km: number
+          started_at: string
+          updated_at?: string
+          user_id: string
+          vehicle_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          end_lat?: number | null
+          end_location?: string | null
+          end_lon?: number | null
+          end_odometer_km?: number | null
+          ended_at?: string | null
+          id?: string
+          is_manual?: boolean | null
+          metadata?: Json | null
+          purpose?: string | null
+          start_lat?: number | null
+          start_location?: string | null
+          start_lon?: number | null
+          start_odometer_km?: number
+          started_at?: string
+          updated_at?: string
+          user_id?: string
+          vehicle_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trips_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string

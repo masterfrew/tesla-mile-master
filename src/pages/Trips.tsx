@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { TripsList } from '@/components/TripsList';
-import { TripsFilter } from '@/components/TripsFilter';
+import { NewTripsList } from '@/components/NewTripsList';
+import { NewTripsFilter } from '@/components/NewTripsFilter';
 import { TripsStats } from '@/components/TripsStats';
-import { TripsMap } from '@/components/TripsMap';
+import { ManualTripForm } from '@/components/ManualTripForm';
 import { supabase } from '@/integrations/supabase/client';
 import { Car, ArrowLeft, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TripsList } from '@/components/TripsList';
+import { TripsFilter } from '@/components/TripsFilter';
+import { TripsMap } from '@/components/TripsMap';
 
 interface Vehicle {
   id: string;
@@ -34,12 +38,15 @@ const Trips = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [tripLocations, setTripLocations] = useState<TripLocation[]>([]);
+  const [activeTab, setActiveTab] = useState('trips');
   
-  // Filter state
+  // Filter state for new trips
   const [selectedVehicle, setSelectedVehicle] = useState('all');
   const [selectedPurpose, setSelectedPurpose] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   
   // Stats state
   const [stats, setStats] = useState({
@@ -114,9 +121,10 @@ const Trips = () => {
     if (!user) return;
 
     try {
+      // Fetch stats from new trips table
       let query = supabase
-        .from('mileage_readings')
-        .select('daily_km, metadata')
+        .from('trips')
+        .select('start_odometer_km, end_odometer_km, purpose')
         .eq('user_id', user.id);
 
       if (selectedVehicle && selectedVehicle !== 'all') {
@@ -124,11 +132,11 @@ const Trips = () => {
       }
 
       if (startDate) {
-        query = query.gte('reading_date', startDate);
+        query = query.gte('started_at', `${startDate}T00:00:00`);
       }
 
       if (endDate) {
-        query = query.lte('reading_date', endDate);
+        query = query.lte('started_at', `${endDate}T23:59:59`);
       }
 
       const { data, error } = await query;
@@ -139,11 +147,10 @@ const Trips = () => {
       let personalKm = 0;
 
       data?.forEach((trip) => {
-        const km = trip.daily_km || 0;
-        const metadata = trip.metadata as any;
-        if (metadata?.purpose === 'business') {
+        const km = trip.end_odometer_km ? trip.end_odometer_km - trip.start_odometer_km : 0;
+        if (trip.purpose === 'business') {
           businessKm += km;
-        } else if (metadata?.purpose === 'personal') {
+        } else if (trip.purpose === 'personal') {
           personalKm += km;
         }
       });
@@ -162,19 +169,23 @@ const Trips = () => {
     if (!user) return;
 
     try {
+      // Fetch from trips table for locations
       let query = supabase
-        .from('mileage_readings')
+        .from('trips')
         .select(`
           id,
-          reading_date,
-          daily_km,
-          metadata,
-          location_name,
+          started_at,
+          start_odometer_km,
+          end_odometer_km,
+          start_lat,
+          start_lon,
+          end_lat,
+          end_lon,
+          end_location,
           vehicle:vehicles(display_name)
         `)
         .eq('user_id', user.id)
-        .not('metadata->latitude', 'is', null)
-        .order('reading_date', { ascending: false })
+        .order('started_at', { ascending: false })
         .limit(50);
 
       if (selectedVehicle && selectedVehicle !== 'all') {
@@ -182,11 +193,11 @@ const Trips = () => {
       }
 
       if (startDate) {
-        query = query.gte('reading_date', startDate);
+        query = query.gte('started_at', `${startDate}T00:00:00`);
       }
 
       if (endDate) {
-        query = query.lte('reading_date', endDate);
+        query = query.lte('started_at', `${endDate}T23:59:59`);
       }
 
       const { data, error } = await query;
@@ -194,15 +205,15 @@ const Trips = () => {
       if (error) throw error;
 
       const locations: TripLocation[] = (data || [])
-        .filter((trip: any) => trip.metadata?.latitude && trip.metadata?.longitude)
+        .filter((trip: any) => trip.end_lat && trip.end_lon)
         .map((trip: any) => ({
           id: trip.id,
-          reading_date: trip.reading_date,
-          daily_km: trip.daily_km || 0,
-          latitude: trip.metadata.latitude,
-          longitude: trip.metadata.longitude,
+          reading_date: trip.started_at.split('T')[0],
+          daily_km: trip.end_odometer_km ? trip.end_odometer_km - trip.start_odometer_km : 0,
+          latitude: trip.end_lat,
+          longitude: trip.end_lon,
           vehicle_name: trip.vehicle?.display_name || 'Onbekend',
-          location_name: trip.location_name || trip.metadata?.location_name,
+          location_name: trip.end_location,
         }));
 
       setTripLocations(locations);
@@ -216,6 +227,8 @@ const Trips = () => {
     setSelectedPurpose('all');
     setStartDate('');
     setEndDate('');
+    setStartTime('');
+    setEndTime('');
   };
 
   const activeFiltersCount = [
@@ -223,6 +236,8 @@ const Trips = () => {
     selectedPurpose !== 'all',
     startDate,
     endDate,
+    startTime,
+    endTime,
   ].filter(Boolean).length;
 
   useEffect(() => {
@@ -252,7 +267,7 @@ const Trips = () => {
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-4">
             <Link to="/">
               <Button variant="ghost" size="icon">
@@ -260,9 +275,9 @@ const Trips = () => {
               </Button>
             </Link>
             <div>
-              <h1 className="text-3xl font-bold">Kilometerbeheer</h1>
+              <h1 className="text-3xl font-bold">Ritregistratie</h1>
               <p className="text-muted-foreground">
-                Bekijk en classificeer je Tesla ritten
+                Beheer je zakelijke en privé ritten
                 {lastSyncTime && (
                   <span className="ml-2 text-xs">• Laatste sync: {lastSyncTime}</span>
                 )}
@@ -270,10 +285,16 @@ const Trips = () => {
             </div>
           </div>
           
-          <Button onClick={handleSync} disabled={isSyncing}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Synchroniseren...' : 'Sync nu'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <ManualTripForm 
+              vehicles={vehicles} 
+              onTripAdded={() => setRefreshTrigger(prev => prev + 1)} 
+            />
+            <Button onClick={handleSync} disabled={isSyncing} variant="outline">
+              <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
+              {isSyncing ? 'Synchroniseren...' : 'Sync Tesla'}
+            </Button>
+          </div>
         </div>
 
         <TripsStats
@@ -282,32 +303,74 @@ const Trips = () => {
           totalKm={stats.totalKm}
         />
 
-        <TripsMap locations={tripLocations} />
-        
-        <TripsFilter
-          vehicles={vehicles}
-          selectedVehicle={selectedVehicle}
-          selectedPurpose={selectedPurpose}
-          startDate={startDate}
-          endDate={endDate}
-          onVehicleChange={setSelectedVehicle}
-          onPurposeChange={setSelectedPurpose}
-          onStartDateChange={setStartDate}
-          onEndDateChange={setEndDate}
-          onReset={handleResetFilters}
-          activeFiltersCount={activeFiltersCount}
-        />
-        
-        <TripsList
-          refreshTrigger={refreshTrigger}
-          vehicles={vehicles}
-          filters={{
-            vehicleId: selectedVehicle,
-            purpose: selectedPurpose,
-            startDate,
-            endDate,
-          }}
-        />
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList>
+            <TabsTrigger value="trips">Ritten</TabsTrigger>
+            <TabsTrigger value="legacy">Dagelijkse data (oud)</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="trips" className="space-y-6 mt-4">
+            <NewTripsFilter
+              vehicles={vehicles}
+              selectedVehicle={selectedVehicle}
+              selectedPurpose={selectedPurpose}
+              startDate={startDate}
+              endDate={endDate}
+              startTime={startTime}
+              endTime={endTime}
+              onVehicleChange={setSelectedVehicle}
+              onPurposeChange={setSelectedPurpose}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+              onStartTimeChange={setStartTime}
+              onEndTimeChange={setEndTime}
+              onReset={handleResetFilters}
+              activeFiltersCount={activeFiltersCount}
+            />
+            
+            <NewTripsList
+              refreshTrigger={refreshTrigger}
+              vehicles={vehicles}
+              filters={{
+                vehicleId: selectedVehicle,
+                purpose: selectedPurpose,
+                startDate,
+                endDate,
+                startTime,
+                endTime,
+              }}
+            />
+          </TabsContent>
+
+          <TabsContent value="legacy" className="space-y-6 mt-4">
+            <TripsMap locations={tripLocations} />
+            
+            <TripsFilter
+              vehicles={vehicles}
+              selectedVehicle={selectedVehicle}
+              selectedPurpose={selectedPurpose}
+              startDate={startDate}
+              endDate={endDate}
+              onVehicleChange={setSelectedVehicle}
+              onPurposeChange={setSelectedPurpose}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+              onReset={handleResetFilters}
+              activeFiltersCount={activeFiltersCount}
+            />
+            
+            <TripsList
+              refreshTrigger={refreshTrigger}
+              vehicles={vehicles}
+              filters={{
+                vehicleId: selectedVehicle,
+                purpose: selectedPurpose,
+                startDate,
+                endDate,
+              }}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
