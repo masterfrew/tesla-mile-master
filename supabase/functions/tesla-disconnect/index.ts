@@ -52,26 +52,19 @@ serve(async (req) => {
 
     console.log('[tesla-disconnect] User authenticated:', user.id);
 
-    // Delete all mileage readings
-    console.log('[tesla-disconnect] Deleting mileage readings...');
-    const { error: mileageError } = await supabaseAdmin
-      .from('mileage_readings')
-      .delete()
-      .eq('user_id', user.id);
+    // IMPORTANT: We do NOT delete mileage_readings - this is the user's historical data!
+    // We only disconnect the Tesla account, not erase their trip history.
 
-    if (mileageError) {
-      console.error('[tesla-disconnect] Error deleting mileage readings:', mileageError);
-    }
-
-    // Delete all vehicles (not just mark inactive)
-    console.log('[tesla-disconnect] Deleting vehicles...');
+    // Mark vehicles as inactive (instead of deleting them)
+    // This preserves the link to mileage_readings and allows reactivation on reconnect
+    console.log('[tesla-disconnect] Marking vehicles as inactive...');
     const { error: vehiclesError } = await supabaseAdmin
       .from('vehicles')
-      .delete()
+      .update({ is_active: false })
       .eq('user_id', user.id);
 
     if (vehiclesError) {
-      console.error('[tesla-disconnect] Error deleting vehicles:', vehiclesError);
+      console.error('[tesla-disconnect] Error marking vehicles inactive:', vehiclesError);
     }
 
     // Clear Tesla tokens from profile
