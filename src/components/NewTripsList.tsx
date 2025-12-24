@@ -186,44 +186,96 @@ export const NewTripsList: React.FC<NewTripsListProps> = ({ refreshTrigger, vehi
   };
 
   const exportToCSV = () => {
+    // Comprehensive export headers for accounting
     const header = [
       'Datum',
       'Vertrektijd',
       'Aankomsttijd',
       'Voertuig',
+      'Kenteken',
       'Start locatie',
       'Eind locatie',
       'Start km-stand',
       'Eind km-stand',
       'Afstand (km)',
-      'Type',
+      'Type rit',
+      'Zakelijk (km)',
+      'Privé (km)',
       'Beschrijving',
-      'Handmatig ingevoerd'
+      'Handmatig ingevoerd',
+      'Google Maps route'
     ].join(',');
+
+    // Calculate totals
+    let totalBusiness = 0;
+    let totalPersonal = 0;
+
+    const csvRows = trips.map(trip => {
+      const escapeCsv = (v: unknown) => String(v ?? '').replace(/"/g, '""');
+      const startDate = new Date(trip.started_at);
+      const endDate = trip.ended_at ? new Date(trip.ended_at) : null;
+      const distance = trip.end_odometer_km ? trip.end_odometer_km - trip.start_odometer_km : 0;
+      
+      const businessKm = trip.purpose === 'business' ? distance : 0;
+      const personalKm = trip.purpose === 'personal' ? distance : 0;
+      totalBusiness += businessKm;
+      totalPersonal += personalKm;
+
+      // Generate Google Maps URL if locations available
+      const startLoc = trip.start_location ? encodeURIComponent(trip.start_location) : '';
+      const endLoc = trip.end_location ? encodeURIComponent(trip.end_location) : '';
+      const mapsUrl = startLoc && endLoc 
+        ? `https://www.google.com/maps/dir/${startLoc}/${endLoc}`
+        : '';
+
+      return [
+        startDate.toLocaleDateString('nl-NL'),
+        startDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
+        endDate ? endDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '',
+        `"${escapeCsv(trip.vehicle?.display_name || 'Onbekend')}"`,
+        '', // Kenteken placeholder - could be added from vehicle data
+        `"${escapeCsv(trip.start_location || 'Niet opgegeven')}"`,
+        `"${escapeCsv(trip.end_location || 'Niet opgegeven')}"`,
+        trip.start_odometer_km,
+        trip.end_odometer_km || '',
+        distance,
+        trip.purpose === 'business' ? 'Zakelijk' : 'Privé',
+        businessKm,
+        personalKm,
+        `"${escapeCsv(trip.description || '')}"`,
+        trip.is_manual ? 'Ja' : 'Nee',
+        `"${escapeCsv(mapsUrl)}"`
+      ].join(',');
+    });
+
+    // Add summary row
+    const summaryRow = [
+      'TOTAAL',
+      '', '', '', '', '', '', '', '',
+      totalBusiness + totalPersonal,
+      '',
+      totalBusiness,
+      totalPersonal,
+      '', '', ''
+    ].join(',');
+
+    // Add disclaimer if any locations are missing
+    const missingLocations = trips.some(t => !t.start_location || !t.end_location);
+    const disclaimerRows = missingLocations ? [
+      '',
+      '"OPMERKING: Sommige locaties zijn niet beschikbaar. Dit kan komen doordat:"',
+      '"- De Tesla in slaapstand was tijdens sync"',
+      '"- Locatie-data niet beschikbaar was via Tesla API"',
+      '"- De rit handmatig is ingevoerd zonder locatie"',
+      '"U kunt locaties handmatig invullen via de app."'
+    ] : [];
 
     const csvContent = [
       header,
-      ...trips.map(trip => {
-        const escapeCsv = (v: unknown) => String(v ?? '').replace(/"/g, '""');
-        const startDate = new Date(trip.started_at);
-        const endDate = trip.ended_at ? new Date(trip.ended_at) : null;
-        const distance = trip.end_odometer_km ? trip.end_odometer_km - trip.start_odometer_km : 0;
-
-        return [
-          startDate.toLocaleDateString('nl-NL'),
-          startDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
-          endDate ? endDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '',
-          `"${escapeCsv(trip.vehicle?.display_name || 'Onbekend')}"`,
-          `"${escapeCsv(trip.start_location || '')}"`,
-          `"${escapeCsv(trip.end_location || '')}"`,
-          trip.start_odometer_km,
-          trip.end_odometer_km || '',
-          distance,
-          trip.purpose === 'business' ? 'Zakelijk' : 'Privé',
-          `"${escapeCsv(trip.description || '')}"`,
-          trip.is_manual ? 'Ja' : 'Nee'
-        ].join(',');
-      })
+      ...csvRows,
+      '',
+      summaryRow,
+      ...disclaimerRows
     ].join('\n');
 
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });

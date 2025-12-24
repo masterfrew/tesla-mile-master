@@ -4,6 +4,7 @@ import { NewTripsList } from '@/components/NewTripsList';
 import { NewTripsFilter } from '@/components/NewTripsFilter';
 import { TripsStats } from '@/components/TripsStats';
 import { ManualTripForm } from '@/components/ManualTripForm';
+import { MigrateMileageButton } from '@/components/MigrateMileageButton';
 import { supabase } from '@/integrations/supabase/client';
 import { Car, ArrowLeft, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -285,7 +286,8 @@ const Trips = () => {
             </div>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <MigrateMileageButton onMigrationComplete={() => setRefreshTrigger(prev => prev + 1)} />
             <ManualTripForm 
               vehicles={vehicles} 
               onTripAdded={() => setRefreshTrigger(prev => prev + 1)} 

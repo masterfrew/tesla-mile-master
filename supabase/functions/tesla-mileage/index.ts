@@ -500,8 +500,15 @@ serve(async (req) => {
 
         // Get location data from Tesla API
         const driveState = vehicleData.response?.drive_state;
-        const latitude = driveState?.latitude || null;
-        const longitude = driveState?.longitude || null;
+        
+        // DEBUG: Log full drive_state to understand what Tesla returns
+        console.log(`[tesla-mileage] DEBUG drive_state for ${vehicleName}:`, JSON.stringify(driveState, null, 2));
+        console.log(`[tesla-mileage] DEBUG vehicle_state:`, JSON.stringify(vehicleData.response?.vehicle_state, null, 2));
+        
+        const latitude = driveState?.latitude || driveState?.active_route_latitude || null;
+        const longitude = driveState?.longitude || driveState?.active_route_longitude || null;
+        
+        console.log(`[tesla-mileage] Location data: lat=${latitude}, lon=${longitude}, native_location_supported=${driveState?.native_location_supported}`);
         
         // Reverse geocode coordinates to get a readable address
         let locationName: string | null = null;
@@ -509,6 +516,8 @@ serve(async (req) => {
           console.log(`[tesla-mileage] Reverse geocoding coordinates: ${latitude}, ${longitude}`);
           locationName = await reverseGeocode(latitude, longitude);
           console.log(`[tesla-mileage] Geocoded location: ${locationName}`);
+        } else {
+          console.log(`[tesla-mileage] WARNING: No location coordinates available from Tesla API`);
         }
 
         console.log(`[tesla-mileage] Vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km, location: ${locationName || 'unknown'} (${latitude}, ${longitude})`);
