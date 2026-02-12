@@ -250,13 +250,16 @@ serve(async (req) => {
         const previousOdo = lastReading?.odometer_km || odometerKm;
         const diffKm = odometerKm - previousOdo;
 
-        // Force log for manual sync to verify connection, even if 0km
-        // In a real background job you might want strict diff > 0, 
-        // but for manual 'Check' button, user expects feedback.
-        if (diffKm >= 0) {
+        // Logic for Cron/Background Sync:
+        // Only log if there is actual movement (diff > 0) OR if it's a manual trigger (FORCE_SYNC)
+        // We use a query param 'scheduled' to detect cron execution
+        const url = new URL(req.url);
+        const isScheduled = url.searchParams.get('scheduled') === 'true';
+
+        if (diffKm > 0 || (!isScheduled && diffKm >= 0)) {
           console.log(`[tesla-mileage] Trip log: ${diffKm} km (Odo: ${odometerKm})`);
 
-          // 1. Store in Supabase (for app state)
+          // 1. Store in Supabase
           await supabase.from('mileage_readings').upsert({
             vehicle_id: vehicle.id,
             user_id: user.id,
@@ -269,12 +272,12 @@ serve(async (req) => {
               longitude: driveState?.longitude,
               synced_at: now.toISOString(),
               start_odometer_km: previousOdo,
-              end_odometer_km: odometerKm
+              end_odometer_km: odometerKm,
+              trigger: isScheduled ? 'cron' : 'manual'
             }
           }, { onConflict: 'vehicle_id,reading_date' });
 
-          // 2. Append to Google Sheet (The Logbook)
-          // Format: [Datum, Tijd, Kenteken, Start KM, Eind KM, Verschil, Locatie, Type]
+          // 2. Append to Google Sheet
           const sheetRow = [
             toDateStr(now),
             toTimeStr(now),
@@ -295,7 +298,7 @@ serve(async (req) => {
           
           synced++;
         } else {
-          console.log('[tesla-mileage] Negative difference detected (rollback?), skipping');
+          console.log('[tesla-mileage] No movement detected, skipping log');
         }
 
       } catch (error) {
