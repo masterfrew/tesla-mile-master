@@ -250,9 +250,11 @@ serve(async (req) => {
         const previousOdo = lastReading?.odometer_km || odometerKm;
         const diffKm = odometerKm - previousOdo;
 
-        // ONLY log if there is a difference or it's the first time
-        if (diffKm > 0 || !lastReading) {
-          console.log(`[tesla-mileage] New trip detected: ${diffKm} km`);
+        // Force log for manual sync to verify connection, even if 0km
+        // In a real background job you might want strict diff > 0, 
+        // but for manual 'Check' button, user expects feedback.
+        if (diffKm >= 0) {
+          console.log(`[tesla-mileage] Trip log: ${diffKm} km (Odo: ${odometerKm})`);
 
           // 1. Store in Supabase (for app state)
           await supabase.from('mileage_readings').upsert({
@@ -262,7 +264,13 @@ serve(async (req) => {
             odometer_km: odometerKm,
             daily_km: diffKm,
             location_name: locationName,
-            metadata: { latitude: driveState?.latitude, longitude: driveState?.longitude }
+            metadata: { 
+              latitude: driveState?.latitude, 
+              longitude: driveState?.longitude,
+              synced_at: now.toISOString(),
+              start_odometer_km: previousOdo,
+              end_odometer_km: odometerKm
+            }
           }, { onConflict: 'vehicle_id,reading_date' });
 
           // 2. Append to Google Sheet (The Logbook)
@@ -287,7 +295,7 @@ serve(async (req) => {
           
           synced++;
         } else {
-          console.log('[tesla-mileage] No movement detected, skipping log');
+          console.log('[tesla-mileage] Negative difference detected (rollback?), skipping');
         }
 
       } catch (error) {

@@ -9,6 +9,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -20,7 +28,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Calendar, MapPin, Car, MoreHorizontal, Download, Edit, Trash2, Loader2, Clock, Navigation } from 'lucide-react';
+import { Calendar, Download, Edit, Trash2, Loader2, MoreHorizontal, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { TripEditDialog } from './TripEditDialog';
 
@@ -93,15 +101,12 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
         .eq('user_id', user.id)
         .order('reading_date', { ascending: false });
 
-      // Apply filters
       if (filters.vehicleId && filters.vehicleId !== 'all') {
         query = query.eq('vehicle_id', filters.vehicleId);
       }
-
       if (filters.startDate) {
         query = query.gte('reading_date', filters.startDate);
       }
-
       if (filters.endDate) {
         query = query.lte('reading_date', filters.endDate);
       }
@@ -110,12 +115,9 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
       query = query.range(startIndex, startIndex + ITEMS_PER_PAGE - 1);
 
       const { data, error } = await query;
-
       if (error) throw error;
 
       let filteredData = data || [];
-
-      // Filter by purpose (client-side since it's in metadata)
       if (filters.purpose && filters.purpose !== 'all') {
         filteredData = filteredData.filter(trip => {
           const metadata = trip.metadata as any;
@@ -145,15 +147,9 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
 
   const handleDelete = async () => {
     if (!deletingTripId) return;
-
     try {
-      const { error } = await supabase
-        .from('mileage_readings')
-        .delete()
-        .eq('id', deletingTripId);
-
+      const { error } = await supabase.from('mileage_readings').delete().eq('id', deletingTripId);
       if (error) throw error;
-
       toast.success('Rit succesvol verwijderd!');
       fetchTrips();
     } catch (error) {
@@ -166,102 +162,45 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
   };
 
   const exportToCSV = () => {
-    const header = [
-      'Datum',
-      'Tijdstip',
-      'Voertuig',
-      'VIN',
-      'Kilometers',
-      'Start km-stand',
-      'Eind km-stand',
-      'Start locatie',
-      'Eind locatie',
-      'Latitude',
-      'Longitude',
-      'Google Maps link',
-      'Doel',
-      'Beschrijving',
-      'Synthetisch (gap-fill)'
-    ].join(',');
-
+    // ... existing export logic ...
+    const header = ['Datum', 'Tijd', 'Kenteken', 'Start KM', 'Eind KM', 'Verschil', 'Locatie', 'Type'].join(',');
     const csvContent = [
-      header,
-      ...trips.map(trip => {
-        const purpose = trip.metadata?.purpose === 'business' ? 'Zakelijk' : 'Privé';
-        const escapeCsv = (v: unknown) => String(v ?? '').split('"').join('""');
-
-        const description = escapeCsv(trip.metadata?.description || '');
-        const time = trip.metadata?.synced_at ? formatTime(trip.metadata.synced_at) : '';
-        const lat = trip.metadata?.latitude ?? '';
-        const lng = trip.metadata?.longitude ?? '';
-
-        const endOdo = Number(trip.metadata?.end_odometer_km ?? trip.odometer_km);
-        const startOdo = Number(
-          trip.metadata?.start_odometer_km ??
-            (trip.metadata?.end_odometer_km ? trip.odometer_km : trip.odometer_km - (trip.daily_km || 0))
-        );
-        const km = Math.max(0, endOdo - startOdo);
-
-        const startLocation = escapeCsv(trip.metadata?.start_location || '');
-        const endLocation = escapeCsv(trip.location_name || trip.metadata?.location_name || trip.metadata?.end_location || '');
-        const mapsLink = lat && lng ? `https://www.google.com/maps?q=${lat},${lng}` : '';
-        const isSynthetic = trip.metadata?.synthetic ? 'ja' : 'nee';
-
-        return [
-          trip.reading_date,
-          `"${time || ''}"`,
-          `"${escapeCsv(trip.vehicle?.display_name || 'Onbekend')}"`,
-          `""`,
-          km,
-          startOdo,
-          endOdo,
-          `"${startLocation}"`,
-          `"${endLocation}"`,
-          lat,
-          lng,
-          `"${mapsLink}"`,
-          `"${purpose}"`,
-          `"${description}"`,
-          `"${isSynthetic}"`
-        ].join(',');
-      })
+        header,
+        ...trips.map(trip => {
+            const date = trip.reading_date;
+            const time = trip.metadata?.synced_at ? new Date(trip.metadata.synced_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '';
+            const plate = trip.vehicle?.display_name || 'Unknown';
+            const endOdo = Number(trip.metadata?.end_odometer_km ?? trip.odometer_km);
+            const startOdo = Number(trip.metadata?.start_odometer_km ?? (endOdo - (trip.daily_km || 0)));
+            const diff = Math.max(0, endOdo - startOdo);
+            const location = trip.location_name || '';
+            const type = trip.metadata?.purpose === 'business' ? 'Zakelijk' : 'Privé';
+            
+            return [date, time, plate, startOdo, endOdo, diff, `"${location}"`, type].join(',');
+        })
     ].join('\n');
-
+    
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     link.setAttribute('download', `km-track-export-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
-    toast.success('Export gedownload!');
   };
 
-  useEffect(() => {
-    fetchTrips();
-  }, [user, refreshTrigger, filters]);
+  useEffect(() => { fetchTrips(); }, [user, refreshTrigger, filters]);
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('nl-NL', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    });
+    return new Date(dateString).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
   };
 
   const formatTime = (isoString: string | null) => {
-    if (!isoString) return null;
+    if (!isoString) return '-';
     try {
-      return new Date(isoString).toLocaleTimeString('nl-NL', {
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch {
-      return null;
-    }
+      return new Date(isoString).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    } catch { return '-'; }
   };
 
   if (loading) {
@@ -286,155 +225,96 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
             {trips.length > 0 && (
               <Button variant="outline" size="sm" onClick={exportToCSV}>
                 <Download className="h-4 w-4 mr-2" />
-                Exporteren
+                CSV Export
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent>
-          {trips.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Car className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Geen ritten gevonden</p>
-              <p className="text-sm">Pas je filters aan of voeg een nieuwe rit toe</p>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-4">
-                {trips.map((trip) => (
-                  <div
-                    key={trip.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition-colors"
-                  >
-                    <div className="flex-1">
-                      {/* Header row with date, time and badge */}
-                      <div className="flex items-center gap-3 mb-3 flex-wrap">
-                        <div className="flex items-center gap-2 font-medium">
-                          <Calendar className="h-4 w-4 text-primary" />
-                          {formatDate(trip.reading_date)}
-                          {trip.metadata?.synced_at && (
-                            <span className="text-muted-foreground font-normal">
-                              om {formatTime(trip.metadata.synced_at)}
-                            </span>
-                          )}
-                        </div>
-                        <Badge 
-                          variant={trip.metadata?.purpose === 'business' ? 'default' : 'secondary'}
-                        >
-                          {trip.metadata?.purpose === 'business' ? 'Zakelijk' : 'Privé'}
-                        </Badge>
-                      </div>
-                      
-                      {/* Main stats grid */}
-                      {(() => {
-                        // Consistent calculation using metadata first, then fallback
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Datum</TableHead>
+                    <TableHead>Tijd</TableHead>
+                    <TableHead>Kenteken</TableHead>
+                    <TableHead className="text-right">Start KM</TableHead>
+                    <TableHead className="text-right">Eind KM</TableHead>
+                    <TableHead className="text-right">Verschil</TableHead>
+                    <TableHead>Locatie</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="w-[50px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {trips.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} className="h-24 text-center">
+                        Geen ritten gevonden.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    trips.map((trip) => {
                         const endOdo = Number(trip.metadata?.end_odometer_km ?? trip.odometer_km);
                         const startOdo = Number(trip.metadata?.start_odometer_km ?? (endOdo - (trip.daily_km || 0)));
-                        const km = Math.max(0, endOdo - startOdo);
-                        
+                        const diff = Math.max(0, endOdo - startOdo);
+                        const purpose = trip.metadata?.purpose === 'business' ? 'Zakelijk' : 'Privé';
+
                         return (
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                            <div className="flex items-center gap-2">
-                              <Car className="h-4 w-4 text-muted-foreground" />
-                              <span className="text-muted-foreground">{trip.vehicle?.display_name || 'Onbekend'}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className={`text-lg font-semibold ${km > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                                {km} km
-                              </span>
-                            </div>
-                            <div className="text-muted-foreground">
-                              Start: {startOdo.toLocaleString()} km
-                            </div>
-                            <div className="text-muted-foreground">
-                              Eind: <span className="font-medium">{endOdo.toLocaleString()} km</span>
-                            </div>
-                          </div>
+                          <TableRow key={trip.id}>
+                            <TableCell>{formatDate(trip.reading_date)}</TableCell>
+                            <TableCell>{formatTime(trip.metadata?.synced_at)}</TableCell>
+                            <TableCell>{trip.vehicle?.display_name || 'Tesla'}</TableCell>
+                            <TableCell className="text-right font-mono">{startOdo.toLocaleString()}</TableCell>
+                            <TableCell className="text-right font-mono">{endOdo.toLocaleString()}</TableCell>
+                            <TableCell className="text-right font-bold font-mono">
+                                {diff > 0 ? `+${diff}` : '-'}
+                            </TableCell>
+                            <TableCell className="max-w-[200px] truncate" title={trip.location_name || ''}>
+                                <div className="flex items-center gap-1">
+                                    {trip.location_name && <MapPin className="h-3 w-3 text-muted-foreground" />}
+                                    {trip.location_name || '-'}
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant={purpose === 'Zakelijk' ? 'default' : 'secondary'}>
+                                    {purpose}
+                                </Badge>
+                            </TableCell>
+                            <TableCell>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                            <MoreHorizontal className="h-4 w-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => setEditingTrip(trip)}>
+                                            <Edit className="h-4 w-4 mr-2" />
+                                            Bewerken
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => { setDeletingTripId(trip.id); setShowDeleteDialog(true); }} className="text-destructive">
+                                            <Trash2 className="h-4 w-4 mr-2" />
+                                            Verwijderen
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
                         );
-                      })()}
-
-                      {/* Location info - Van → Naar display */}
-                      {(trip.location_name || trip.metadata?.location_name || trip.metadata?.latitude) && (
-                        <div className="flex flex-col gap-1 p-2 bg-muted/50 rounded-md text-sm">
-                          <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-primary flex-shrink-0" />
-                            <span className="text-foreground">
-                              {trip.location_name || trip.metadata?.location_name || 'Locatie beschikbaar'}
-                            </span>
-                            {trip.metadata?.latitude && trip.metadata?.longitude && (
-                              <a 
-                                href={`https://www.google.com/maps?q=${trip.metadata.latitude},${trip.metadata.longitude}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="ml-auto flex items-center gap-1 text-primary hover:underline font-medium"
-                              >
-                                <Navigation className="h-4 w-4" />
-                                Kaart
-                              </a>
-                            )}
-                          </div>
-                          {trip.metadata?.start_location && trip.metadata?.start_location !== trip.location_name && (
-                            <div className="text-xs text-muted-foreground ml-6">
-                              Van: {trip.metadata.start_location}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {trip.metadata?.description && (
-                        <p className="mt-2 text-sm text-muted-foreground italic">
-                          {trip.metadata.description}
-                        </p>
-                      )}
-                    </div>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setEditingTrip(trip)}>
-                          <Edit className="h-4 w-4 mr-2" />
-                          Bewerken
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setDeletingTripId(trip.id);
-                            setShowDeleteDialog(true);
-                          }}
-                          className="text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Verwijderen
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
-              </div>
-              
-              {hasMore && (
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            
+            {hasMore && (
                 <div className="mt-4 flex justify-center">
-                  <Button
-                    variant="outline"
-                    onClick={handleLoadMore}
-                    disabled={loadingMore}
-                  >
-                    {loadingMore ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Laden...
-                      </>
-                    ) : (
-                      'Laad meer'
-                    )}
+                  <Button variant="outline" onClick={handleLoadMore} disabled={loadingMore}>
+                    {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Meer laden'}
                   </Button>
                 </div>
-              )}
-            </>
-          )}
+            )}
         </CardContent>
       </Card>
 
@@ -443,25 +323,18 @@ export const TripsList: React.FC<TripsListProps> = ({ refreshTrigger, vehicles, 
         vehicles={vehicles}
         open={!!editingTrip}
         onOpenChange={(open) => !open && setEditingTrip(null)}
-        onTripUpdated={() => {
-          setEditingTrip(null);
-          fetchTrips();
-        }}
+        onTripUpdated={() => { setEditingTrip(null); fetchTrips(); }}
       />
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Weet je het zeker?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Deze actie kan niet ongedaan gemaakt worden. De rit wordt permanent verwijderd.
-            </AlertDialogDescription>
+            <AlertDialogDescription>Deze actie kan niet ongedaan gemaakt worden.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annuleren</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Verwijderen
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">Verwijderen</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
