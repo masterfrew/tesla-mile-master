@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
 import { encryptToken, decryptToken } from '../_shared/encryption.ts';
+import { appendToSheet } from '../_shared/sheets.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,8 +14,13 @@ const RETRY_DELAY_MS = 2000;
 const WAKE_TIMEOUT_MS = 60000; // 60 seconds max for wake-up
 const WAKE_POLL_INTERVAL_MS = 3000; // Check every 3 seconds
 
+// Replace this with your actual spreadsheet ID or fetch from DB (hardcoded for now)
+const SPREADSHEET_ID = '1xU7-FSZ1keYUAhEpt-2RRXWzLwjzvUUbesS4SJRI_3o';
+const SHEET_NAME = 'Ritten';
+
 // Date helpers (work in UTC date strings: YYYY-MM-DD)
 const toDateStr = (d: Date) => d.toISOString().split('T')[0];
+const toTimeStr = (d: Date) => d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
 const parseDateStr = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const addDays = (s: string, days: number) => {
   const d = parseDateStr(s);
@@ -434,6 +440,79 @@ async function syncUserVehicles(
           daily_km: dailyKm,
           reading_date: baseSnapshot?.reading_date || today,
         });
+
+        // 3. Append to Google Sheet if there was movement
+        // Only if daily_km > 0. (For cron jobs, daily_km here represents km driven since the *previous* sync,
+        // IF we assume the previous sync was earlier today or yesterday).
+        // BUT: syncUserVehicles calculates daily_km against the *start of the day* or previous day snapshot.
+        // Wait, let's re-read:
+        // const baseSnapshot = prevSnapshot || lastReading;
+        // const dailyKm = baseOdometer > 0 ? Math.max(0, odometerKm - baseOdometer) : 0;
+        
+        // This daily_km is the total km driven *since baseSnapshot*.
+        // If baseSnapshot was yesterday, daily_km is total for today so far.
+        // If we log this to sheet every hour, we log the cumulative total repeatedly.
+        // We only want to log the *difference* since the last log.
+        // Or we just append a row with the current timestamp and odometer, and let the sheet/user figure it out.
+        // Legend said: "Elk uur een nieuwe regel (ook als je maar 5km hebt gereden)? Resultaat: Veel regels per dag. Eén regel per dag die ik steeds update? Resultaat: Lekker overzichtelijk".
+        // He hasn't answered yet, but "update" is harder with `appendToSheet`.
+        // Let's implement append for now, but only if odometer changed since last successful sync.
+        
+        // To do that, we need to know what the odometer was at the LAST sync.
+        // `lastReading` (fetched at start of loop) holds the latest entry in DB.
+        // If we successfully upserted just now, `lastReading` is now outdated.
+        // But `baseOdometer` is what we compared against.
+        
+        // If daily_km > 0, it means odometer > baseOdometer.
+        // So we have movement.
+        
+        if (dailyKm > 0) {
+            // Check if we already logged this odometer value (to prevent duplicates if cron runs but car didn't move further)
+            // Actually, if car didn't move, odometerKm == baseOdometer, so dailyKm == 0.
+            // So if dailyKm > 0, we have new distance.
+            
+            // Wait, if we run at 10:00 and drive 10km (daily_km=10). Logged.
+            // Run at 11:00, still 10km driven total today (car parked). daily_km=10.
+            // We don't want to log 10km AGAIN.
+            
+            // We need to know if the odometer changed *since the last sync execution*.
+            // `vehicle_sync_status` table tracks `last_successful_sync`.
+            // But it doesn't store the odometer of that sync.
+            
+            // We can look at `mileage_readings` metadata?
+            // "end_odometer_km" is updated on every sync.
+            // If we fetch `lastReading` BEFORE the upsert/update (which we did),
+            // and `odometerKm` (current) > `lastReading.odometer_km`, THEN we have new movement.
+            
+            // `lastReading` was fetched at start of loop.
+            const previousStoredOdometer = lastReading?.odometer_km || 0;
+            const kmSinceLastSync = odometerKm - previousStoredOdometer;
+            
+            if (kmSinceLastSync > 0) {
+                console.log(`[tesla-sync-all] New movement detected (${kmSinceLastSync} km). Appending to sheet.`);
+                
+                const sheetRow = [
+                    toDateStr(now),
+                    toTimeStr(now),
+                    vehicle.license_plate || vehicle.vin || vehicleName,
+                    previousStoredOdometer,
+                    odometerKm,
+                    kmSinceLastSync,
+                    locationName || "Onbekend",
+                    "Zakelijk" // Default
+                ];
+
+                try {
+                    await appendToSheet(SPREADSHEET_ID, `${SHEET_NAME}!A:H`, sheetRow);
+                    console.log('[tesla-sync-all] Logged to Google Sheet');
+                } catch (sheetError) {
+                    console.error('[tesla-sync-all] Failed to log to sheet:', sheetError);
+                    // Don't fail the whole sync for sheet error
+                }
+            } else {
+                 console.log(`[tesla-sync-all] No new movement since last sync (Odo: ${odometerKm}). Skipping sheet log.`);
+            }
+        }
       }
 
     } catch (error) {
