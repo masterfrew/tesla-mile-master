@@ -172,6 +172,21 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const fetchRecentTrips = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('trips')
+        .select('id, started_at, start_location, end_location, start_odometer_km, end_odometer_km, purpose')
+        .eq('user_id', user?.id)
+        .order('started_at', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      setRecentTrips(data || []);
+    } catch (error) {
+      console.error('Error fetching recent trips:', error);
+    }
+  };
+
   const handleSignOut = async () => {
     await signOut();
   };
