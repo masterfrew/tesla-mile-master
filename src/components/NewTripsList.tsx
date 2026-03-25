@@ -186,15 +186,14 @@ export const NewTripsList: React.FC<NewTripsListProps> = ({ refreshTrigger, vehi
   };
 
   const exportToCSV = () => {
-    // Comprehensive export headers for accounting
     const header = [
       'Datum',
       'Vertrektijd',
       'Aankomsttijd',
+      'Duur (min)',
       'Voertuig',
-      'Kenteken',
-      'Start locatie',
-      'Eind locatie',
+      'Startlocatie',
+      'Eindlocatie',
       'Start km-stand',
       'Eind km-stand',
       'Afstand (km)',
@@ -206,25 +205,26 @@ export const NewTripsList: React.FC<NewTripsListProps> = ({ refreshTrigger, vehi
       'Google Maps route'
     ].join(',');
 
-    // Calculate totals
     let totalBusiness = 0;
     let totalPersonal = 0;
 
     const csvRows = trips.map(trip => {
-      const escapeCsv = (v: unknown) => String(v ?? '').replace(/"/g, '""');
+      const escapeCsv = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
       const startDate = new Date(trip.started_at);
       const endDate = trip.ended_at ? new Date(trip.ended_at) : null;
       const distance = trip.end_odometer_km ? trip.end_odometer_km - trip.start_odometer_km : 0;
-      
+      const durationMin = endDate
+        ? Math.round((endDate.getTime() - startDate.getTime()) / 60000)
+        : '';
+
       const businessKm = trip.purpose === 'business' ? distance : 0;
       const personalKm = trip.purpose === 'personal' ? distance : 0;
       totalBusiness += businessKm;
       totalPersonal += personalKm;
 
-      // Generate Google Maps URL if locations available
       const startLoc = trip.start_location ? encodeURIComponent(trip.start_location) : '';
       const endLoc = trip.end_location ? encodeURIComponent(trip.end_location) : '';
-      const mapsUrl = startLoc && endLoc 
+      const mapsUrl = startLoc && endLoc
         ? `https://www.google.com/maps/dir/${startLoc}/${endLoc}`
         : '';
 
@@ -232,34 +232,29 @@ export const NewTripsList: React.FC<NewTripsListProps> = ({ refreshTrigger, vehi
         startDate.toLocaleDateString('nl-NL'),
         startDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
         endDate ? endDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '',
-        `"${escapeCsv(trip.vehicle?.display_name || 'Onbekend')}"`,
-        '', // Kenteken placeholder - could be added from vehicle data
-        `"${escapeCsv(trip.start_location || 'Niet opgegeven')}"`,
-        `"${escapeCsv(trip.end_location || 'Niet opgegeven')}"`,
+        durationMin,
+        escapeCsv(trip.vehicle?.display_name || 'Onbekend'),
+        escapeCsv(trip.start_location || 'Niet opgegeven'),
+        escapeCsv(trip.end_location || 'Niet opgegeven'),
         trip.start_odometer_km,
         trip.end_odometer_km || '',
         distance,
         trip.purpose === 'business' ? 'Zakelijk' : 'Privé',
         businessKm,
         personalKm,
-        `"${escapeCsv(trip.description || '')}"`,
+        escapeCsv(trip.description || ''),
         trip.is_manual ? 'Ja' : 'Nee',
-        `"${escapeCsv(mapsUrl)}"`
+        escapeCsv(mapsUrl)
       ].join(',');
     });
 
-    // Add summary row
     const summaryRow = [
-      'TOTAAL',
-      '', '', '', '', '', '', '', '',
+      'TOTAAL', '', '', '', '', '', '', '', '',
       totalBusiness + totalPersonal,
-      '',
-      totalBusiness,
-      totalPersonal,
+      '', totalBusiness, totalPersonal,
       '', '', ''
     ].join(',');
 
-    // Add disclaimer if any locations are missing
     const missingLocations = trips.some(t => !t.start_location || !t.end_location);
     const disclaimerRows = missingLocations ? [
       '',
@@ -270,24 +265,15 @@ export const NewTripsList: React.FC<NewTripsListProps> = ({ refreshTrigger, vehi
       '"U kunt locaties handmatig invullen via de app."'
     ] : [];
 
-    const csvContent = [
-      header,
-      ...csvRows,
-      '',
-      summaryRow,
-      ...disclaimerRows
-    ].join('\n');
-
+    const csvContent = [header, ...csvRows, '', summaryRow, ...disclaimerRows].join('\n');
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `ritten-export-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('href', URL.createObjectURL(blob));
+    link.setAttribute('download', `ritregistratie-${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
     toast.success('Export gedownload!');
   };
 

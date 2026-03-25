@@ -646,7 +646,7 @@ async function getValidAccessToken(
         p_expires_at: newExpiresAt
       });
 
-      await logAuditEvent(supabase, userId, 'TOKEN_REFRESH', 'tesla_auth', null, { success: true });
+      await logAuditEvent(supabase, userId, 'TOKEN_REFRESH', 'tesla_auth', undefined, { success: true });
 
       console.log(`[tesla-sync-all] Token refreshed for user ${userId}`);
       return { token: tokens.access_token, refreshed: true };
