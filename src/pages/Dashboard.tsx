@@ -70,6 +70,16 @@ interface MileageStats {
   monthlyAverage: number;
 }
 
+interface RecentTrip {
+  id: string;
+  started_at: string;
+  start_location: string | null;
+  end_location: string | null;
+  start_odometer_km: number;
+  end_odometer_km: number | null;
+  purpose: string;
+}
+
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
   const { isAdmin } = useAdminCheck();
@@ -77,6 +87,7 @@ const Dashboard: React.FC = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [mileageStats, setMileageStats] = useState<MileageStats>({ thisMonth: 0, thisYear: 0, monthlyAverage: 0 });
+  const [recentTrips, setRecentTrips] = useState<RecentTrip[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [deleteVehicleId, setDeleteVehicleId] = useState<string | null>(null);
@@ -88,6 +99,7 @@ const Dashboard: React.FC = () => {
       fetchProfile();
       fetchVehicles();
       fetchMileageStats();
+      fetchRecentTrips();
     }
   }, [user]);
 
