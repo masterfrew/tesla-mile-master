@@ -594,6 +594,75 @@ const Dashboard: React.FC = () => {
                 </Link>
               </CardContent>
             </Card>
+
+            {/* Recent Trips Widget */}
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <MapPin className="h-5 w-5" />
+                      Recente ritten
+                    </CardTitle>
+                    <CardDescription>Laatste 5 geregistreerde ritten</CardDescription>
+                  </div>
+                  <Link to="/trips">
+                    <Button variant="ghost" size="sm" className="gap-1">
+                      Alle ritten
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {recentTrips.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nog geen ritten geregistreerd</p>
+                    <Link to="/trips">
+                      <Button variant="outline" size="sm" className="mt-3">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Voeg eerste rit toe
+                      </Button>
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {recentTrips.map((trip) => {
+                      const distance = trip.end_odometer_km
+                        ? trip.end_odometer_km - trip.start_odometer_km
+                        : 0;
+                      return (
+                        <div key={trip.id} className="flex items-center gap-4 p-3 rounded-lg hover:bg-accent/30 transition-colors">
+                          <div className="text-sm text-muted-foreground w-24 shrink-0">
+                            {new Date(trip.started_at).toLocaleDateString('nl-NL', {
+                              day: 'numeric', month: 'short',
+                            })}
+                            <div className="text-xs">
+                              {new Date(trip.started_at).toLocaleTimeString('nl-NL', {
+                                hour: '2-digit', minute: '2-digit',
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1 text-sm truncate">
+                              <span className="truncate">{trip.start_location || 'Onbekend'}</span>
+                              <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                              <span className="truncate">{trip.end_location || 'Onbekend'}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Badge variant={trip.purpose === 'business' ? 'default' : 'secondary'} className="text-xs">
+                              {trip.purpose === 'business' ? 'Zakelijk' : 'Privé'}
+                            </Badge>
+                            <span className="font-semibold text-primary text-sm">{distance} km</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
       </div>
