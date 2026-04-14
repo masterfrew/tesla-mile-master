@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
+import { reverseGeocode } from '../_shared/geocoding.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -101,7 +102,34 @@ serve(async (req) => {
 
         // Convert miles to kilometers
         const odometerKm = Math.round(odometerMiles * 1.60934);
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+
+        // Extract drive_state for location data
+        const driveState = vehicleData.response?.drive_state || {};
+        const latitude = driveState.latitude || null;
+        const longitude = driveState.longitude || null;
+        const heading = driveState.heading || null;
+        const speed = driveState.speed || null;
+        const activeRouteDestination = driveState.active_route_destination || null;
+
+        // Reverse geocode the current position
+        let locationName = activeRouteDestination;
+        let geocodeResult = null;
+        if (latitude && longitude) {
+          try {
+            geocodeResult = await reverseGeocode(latitude, longitude);
+            if (geocodeResult) {
+              locationName = geocodeResult.shortName;
+              console.log(`Geocoded ${latitude},${longitude} → ${locationName}`);
+            }
+          } catch (geoError) {
+            console.error('Geocoding failed:', geoError);
+            if (!locationName) {
+              locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+            }
+          }
+        }
 
         // Get previous reading to calculate daily km
         const { data: prevReading } = await supabase
@@ -112,25 +140,43 @@ serve(async (req) => {
           .limit(1)
           .single();
 
-        const dailyKm = prevReading 
+        const dailyKm = prevReading
           ? Math.max(0, odometerKm - prevReading.odometer_km)
           : 0;
 
-        // Store mileage reading
+        // Store mileage reading with location data
         const { error: insertError } = await supabase
           .from('mileage_readings')
-          .insert({
+          .upsert({
             vehicle_id: vehicle.id,
             user_id: user.id,
             reading_date: today,
             odometer_km: odometerKm,
             daily_km: dailyKm,
-          });
+            location_name: locationName,
+            metadata: {
+              synced_at: now.toISOString(),
+              latitude,
+              longitude,
+              heading,
+              speed,
+              location_name: locationName,
+              start_odometer_km: prevReading?.odometer_km || odometerKm,
+              end_odometer_km: odometerKm,
+              geocode: geocodeResult ? {
+                display_name: geocodeResult.displayName,
+                short_name: geocodeResult.shortName,
+                city: geocodeResult.city,
+                road: geocodeResult.road,
+                postcode: geocodeResult.postcode,
+              } : null,
+            },
+          }, { onConflict: 'vehicle_id,reading_date' });
 
         if (insertError) {
           console.error('Failed to insert mileage reading:', insertError);
         } else {
-          console.log(`Stored mileage for vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km`);
+          console.log(`Stored mileage for vehicle ${vehicle.tesla_vehicle_id}: ${odometerKm} km at ${locationName || 'unknown location'}`);
           synced++;
         }
 

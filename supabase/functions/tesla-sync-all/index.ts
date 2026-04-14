@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
 import { encryptToken, decryptToken } from '../_shared/encryption.ts';
 import { appendToSheet } from '../_shared/sheets.ts';
+import { reverseGeocode } from '../_shared/geocoding.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -269,6 +270,172 @@ async function backfillMissingDays(
   }
 }
 
+/**
+ * Create or update a daily trip record in the `trips` table.
+ *
+ * Logic:
+ * - On first sync of the day: creates a new trip with current location as start.
+ * - On subsequent syncs: updates end location, end odometer, and ended_at.
+ * - If the car has moved (dailyKm > 0), the start location is preserved from the
+ *   first sync of the day, and the end location is updated to the current position.
+ */
+async function upsertDailyTrip(
+  supabase: any,
+  params: {
+    vehicleId: string;
+    userId: string;
+    date: string;        // YYYY-MM-DD
+    startOdometer: number;
+    endOdometer: number;
+    dailyKm: number;
+    latitude: number | null;
+    longitude: number | null;
+    locationName: string | null;
+    geocodeResult: any | null;
+    now: Date;
+  }
+): Promise<void> {
+  const {
+    vehicleId, userId, date, startOdometer, endOdometer,
+    dailyKm, latitude, longitude, locationName, geocodeResult, now,
+  } = params;
+
+  try {
+    // Check if there's already a trip for this vehicle + date
+    const dayStart = `${date}T00:00:00.000Z`;
+    const dayEnd = `${date}T23:59:59.999Z`;
+
+    const { data: existingTrip } = await supabase
+      .from('trips')
+      .select('id, start_lat, start_lon, start_location, start_odometer_km, started_at')
+      .eq('vehicle_id', vehicleId)
+      .eq('user_id', userId)
+      .eq('is_manual', false)
+      .gte('started_at', dayStart)
+      .lte('started_at', dayEnd)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingTrip) {
+      // ── UPDATE existing trip: set end location to current position ──
+      const updateData: Record<string, any> = {
+        ended_at: now.toISOString(),
+        end_odometer_km: endOdometer,
+        updated_at: now.toISOString(),
+      };
+
+      // Only update end location if we have coordinates
+      if (latitude && longitude) {
+        updateData.end_lat = latitude;
+        updateData.end_lon = longitude;
+        updateData.end_location = locationName;
+      }
+
+      // Update metadata with latest geocoding info
+      updateData.metadata = {
+        last_sync: now.toISOString(),
+        daily_km: dailyKm,
+        geocode_end: geocodeResult ? {
+          display_name: geocodeResult.displayName,
+          city: geocodeResult.city,
+          road: geocodeResult.road,
+          postcode: geocodeResult.postcode,
+        } : null,
+      };
+
+      const { error: updateError } = await supabase
+        .from('trips')
+        .update(updateData)
+        .eq('id', existingTrip.id);
+
+      if (updateError) {
+        console.error('[tesla-sync-all] Failed to update trip:', updateError);
+      } else {
+        console.log(`[tesla-sync-all] Updated trip ${existingTrip.id} — end: ${locationName || 'unknown'}, ${endOdometer} km`);
+      }
+
+    } else if (dailyKm > 0) {
+      // ── CREATE new trip for today ──
+      // The start location is wherever the car was at the start of the day (previous sync position).
+      // We need to look up the previous day's end location.
+      const { data: prevTrip } = await supabase
+        .from('trips')
+        .select('end_lat, end_lon, end_location')
+        .eq('vehicle_id', vehicleId)
+        .eq('user_id', userId)
+        .lt('started_at', dayStart)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const startLat = prevTrip?.end_lat || null;
+      const startLon = prevTrip?.end_lon || null;
+      let startLocation = prevTrip?.end_location || null;
+
+      // If we have previous coordinates but no location name, try geocoding them
+      if (startLat && startLon && !startLocation) {
+        try {
+          const startGeo = await reverseGeocode(startLat, startLon);
+          if (startGeo) {
+            startLocation = startGeo.shortName;
+            console.log(`[tesla-sync-all] Geocoded start ${startLat},${startLon} → ${startLocation}`);
+          }
+        } catch (e) {
+          console.error('[tesla-sync-all] Start geocoding failed:', e);
+        }
+        // Respect Nominatim rate limit (1 req/sec)
+        await sleep(1100);
+      }
+
+      const tripData = {
+        vehicle_id: vehicleId,
+        user_id: userId,
+        started_at: `${date}T00:00:00.000Z`,
+        ended_at: now.toISOString(),
+        start_odometer_km: startOdometer,
+        end_odometer_km: endOdometer,
+        start_lat: startLat,
+        start_lon: startLon,
+        start_location: startLocation,
+        end_lat: latitude,
+        end_lon: longitude,
+        end_location: locationName,
+        purpose: 'personal',  // Default, user can change in the UI
+        is_manual: false,
+        description: null,
+        metadata: {
+          created_by: 'tesla-sync-all',
+          created_at: now.toISOString(),
+          daily_km: dailyKm,
+          geocode_start: startLocation ? { from_previous_trip: true } : null,
+          geocode_end: geocodeResult ? {
+            display_name: geocodeResult.displayName,
+            city: geocodeResult.city,
+            road: geocodeResult.road,
+            postcode: geocodeResult.postcode,
+          } : null,
+        },
+      };
+
+      const { error: insertError } = await supabase
+        .from('trips')
+        .insert(tripData);
+
+      if (insertError) {
+        console.error('[tesla-sync-all] Failed to create trip:', insertError);
+      } else {
+        console.log(`[tesla-sync-all] Created trip: ${startLocation || '?'} → ${locationName || '?'} (${dailyKm} km)`);
+      }
+    }
+    // If dailyKm === 0 and no existing trip, do nothing (car didn't move)
+
+  } catch (error) {
+    console.error('[tesla-sync-all] Trip upsert error:', error);
+    // Don't fail the sync for a trip record issue
+  }
+}
+
 async function syncUserVehicles(
   supabase: any,
   userId: string,
@@ -355,10 +522,38 @@ async function syncUserVehicles(
       const odometerKm = Math.round(odometerMiles * 1.60934);
       const yesterday = addDays(today, -1);
 
-      const driveState = result.data?.response?.drive_state;
-      const locationName = driveState?.active_route_destination || null;
-      const latitude = driveState?.latitude || null;
-      const longitude = driveState?.longitude || null;
+      const driveState = result.data?.response?.drive_state || {};
+      const chargeState = result.data?.response?.charge_state || {};
+      const vehicleState = result.data?.response?.vehicle_state || {};
+
+      const latitude = driveState.latitude || null;
+      const longitude = driveState.longitude || null;
+      const heading = driveState.heading || null;
+      const speed = driveState.speed || null; // mph, null if parked
+      const shiftState = driveState.shift_state || null; // D, R, P, N, or null
+      const nativeLocationSupported = driveState.native_location_supported ?? null;
+      const activeRouteDestination = driveState.active_route_destination || null;
+
+      // Reverse geocode current position to get a readable address
+      let locationName = activeRouteDestination;
+      let geocodeResult = null;
+
+      if (latitude && longitude) {
+        try {
+          geocodeResult = await reverseGeocode(latitude, longitude);
+          if (geocodeResult) {
+            // Use the short name (e.g. "Keizersgracht, Amsterdam") as location
+            locationName = geocodeResult.shortName;
+            console.log(`[tesla-sync-all] Geocoded ${latitude},${longitude} → ${locationName}`);
+          }
+        } catch (geoError) {
+          console.error('[tesla-sync-all] Geocoding failed:', geoError);
+          // Fall back to active_route_destination or coordinates
+          if (!locationName && latitude && longitude) {
+            locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+          }
+        }
+      }
 
       // Re-fetch yesterday's snapshot (after backfill). If missing, fall back to lastReading.
       const { data: prevSnapshot } = await supabase
@@ -386,7 +581,17 @@ async function syncUserVehicles(
           end_odometer_km: odometerKm,
           latitude,
           longitude,
+          heading,
+          speed,
+          shift_state: shiftState,
           location_name: locationName,
+          geocode: geocodeResult ? {
+            display_name: geocodeResult.displayName,
+            short_name: geocodeResult.shortName,
+            city: geocodeResult.city,
+            road: geocodeResult.road,
+            postcode: geocodeResult.postcode,
+          } : null,
         };
 
         const { error: updateError } = await supabase
@@ -420,9 +625,19 @@ async function syncUserVehicles(
               synced_at: now.toISOString(),
               latitude,
               longitude,
+              heading,
+              speed,
+              shift_state: shiftState,
               location_name: locationName,
               start_odometer_km: odometerKm,
               end_odometer_km: odometerKm,
+              geocode: geocodeResult ? {
+                display_name: geocodeResult.displayName,
+                short_name: geocodeResult.shortName,
+                city: geocodeResult.city,
+                road: geocodeResult.road,
+                postcode: geocodeResult.postcode,
+              } : null,
             },
           },
           { onConflict: 'vehicle_id,reading_date' }
@@ -439,6 +654,22 @@ async function syncUserVehicles(
           odometer_km: odometerKm,
           daily_km: dailyKm,
           reading_date: baseSnapshot?.reading_date || today,
+        });
+
+        // ── Create or update trip record in the `trips` table ──
+        // This gives the frontend rich start/end location data for each day's driving.
+        await upsertDailyTrip(supabase, {
+          vehicleId: vehicle.id,
+          userId,
+          date: baseSnapshot?.reading_date || today,
+          startOdometer: baseOdometer,
+          endOdometer: odometerKm,
+          dailyKm,
+          latitude,
+          longitude,
+          locationName,
+          geocodeResult,
+          now,
         });
 
         // 3. Append to Google Sheet if there was movement
@@ -491,6 +722,24 @@ async function syncUserVehicles(
             if (kmSinceLastSync > 0) {
                 console.log(`[tesla-sync-all] New movement detected (${kmSinceLastSync} km). Appending to sheet.`);
                 
+                // Get the start location from today's trip record (if available)
+                let sheetStartLocation = 'Onbekend';
+                try {
+                  const { data: todayTrip } = await supabase
+                    .from('trips')
+                    .select('start_location, end_location')
+                    .eq('vehicle_id', vehicle.id)
+                    .eq('user_id', userId)
+                    .gte('started_at', `${today}T00:00:00`)
+                    .lte('started_at', `${today}T23:59:59`)
+                    .order('started_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                  if (todayTrip?.start_location) sheetStartLocation = todayTrip.start_location;
+                } catch (e) {
+                  // ignore
+                }
+
                 const sheetRow = [
                     toDateStr(now),
                     toTimeStr(now),
@@ -498,12 +747,13 @@ async function syncUserVehicles(
                     previousStoredOdometer,
                     odometerKm,
                     kmSinceLastSync,
+                    sheetStartLocation,
                     locationName || "Onbekend",
-                    "Zakelijk" // Default
+                    "Privé" // Default — user changes in app
                 ];
 
                 try {
-                    await appendToSheet(SPREADSHEET_ID, `${SHEET_NAME}!A:H`, sheetRow);
+                    await appendToSheet(SPREADSHEET_ID, `${SHEET_NAME}!A:I`, sheetRow);
                     console.log('[tesla-sync-all] Logged to Google Sheet');
                 } catch (sheetError) {
                     console.error('[tesla-sync-all] Failed to log to sheet:', sheetError);
