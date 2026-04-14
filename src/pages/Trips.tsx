@@ -192,9 +192,9 @@ const Trips = () => {
         {/* Main tabs */}
         <Tabs defaultValue="daily">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="calendar">📅 Kalender</TabsTrigger>
-            <TabsTrigger value="daily">📋 Per dag</TabsTrigger>
+            <TabsTrigger value="daily">📋 Dagrapport</TabsTrigger>
             <TabsTrigger value="all">📄 Alle ritten</TabsTrigger>
+            <TabsTrigger value="calendar">📅 Kalender</TabsTrigger>
           </TabsList>
 
           <TabsContent value="calendar" className="mt-4">
