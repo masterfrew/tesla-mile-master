@@ -553,6 +553,8 @@ async function syncUserVehicles(
             locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
           }
         }
+        // Respect Nominatim rate limit (1 req/sec) before any subsequent geocode calls
+        await sleep(1100);
       }
 
       // Re-fetch yesterday's snapshot (after backfill). If missing, fall back to lastReading.
