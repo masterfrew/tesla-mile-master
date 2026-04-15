@@ -1,12 +1,10 @@
--- Enable pg_cron extension
-create extension if not exists pg_cron;
+-- Update Tesla sync cron job from hourly to every 15 minutes
+-- This enables near-real-time trip tracking instead of max 1-hour delay
 
--- Remove existing job if present
+-- Remove old hourly job
 select cron.unschedule('tesla-sync-all');
 
--- Schedule the job to run every 15 minutes for near-real-time trip tracking
--- Replace PROJECT_REF with your actual project reference (hqpwepmdxzmuevalzkix)
--- Replace CRON_SECRET with your actual secret (from .env or Supabase Dashboard)
+-- Reschedule to run every 15 minutes
 select cron.schedule(
   'tesla-sync-all',
   '*/15 * * * *',

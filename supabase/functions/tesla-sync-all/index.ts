@@ -1,7 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
-import { encryptToken, decryptToken } from '../_shared/encryption.ts';
 import { appendToSheet } from '../_shared/sheets.ts';
 import { reverseGeocode } from '../_shared/geocoding.ts';
 
@@ -778,70 +777,37 @@ async function syncUserVehicles(
   return { synced, failed, offline, errors };
 }
 
-// Get tokens with fallback to profiles table for migration
-async function getTokensWithFallback(
+// Get tokens from the pgsodium vault (store_tesla_tokens / get_tesla_access_token RPCs).
+// Falls back to profiles table for any users who haven't reconnected yet.
+async function getTokensFromVault(
   supabase: any,
   userId: string
 ): Promise<{ accessToken: string | null; refreshToken: string | null; expiresAt: Date | null }> {
-  
-  // First, try encrypted tokens
-  const { data: encryptedTokenData } = await supabase
-    .from('encrypted_tesla_tokens')
-    .select('encrypted_access_token, encrypted_refresh_token, token_expires_at')
-    .eq('user_id', userId)
-    .maybeSingle();
 
-  if (encryptedTokenData?.encrypted_access_token) {
-    try {
-      const accessToken = await decryptToken(encryptedTokenData.encrypted_access_token);
-      const refreshToken = encryptedTokenData.encrypted_refresh_token 
-        ? await decryptToken(encryptedTokenData.encrypted_refresh_token)
-        : null;
-      const expiresAt = encryptedTokenData.token_expires_at 
-        ? new Date(encryptedTokenData.token_expires_at) 
-        : null;
-      return { accessToken, refreshToken, expiresAt };
-    } catch (error) {
-      console.error(`[tesla-sync-all] Failed to decrypt tokens for user ${userId}:`, error);
-    }
+  // Primary: pgsodium vault via RPC (set by tesla-auth)
+  const { data: accessToken, error: atError } = await supabase.rpc('get_tesla_access_token', {
+    p_user_id: userId,
+  });
+  const { data: refreshToken, error: rtError } = await supabase.rpc('get_tesla_refresh_token', {
+    p_user_id: userId,
+  });
+
+  if (!atError && accessToken) {
+    // Get expiry from profiles (non-sensitive column)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tesla_token_expires_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const expiresAt = profile?.tesla_token_expires_at
+      ? new Date(profile.tesla_token_expires_at)
+      : null;
+
+    return { accessToken, refreshToken: refreshToken || null, expiresAt };
   }
 
-  // Fallback: check profiles table
-  console.log(`[tesla-sync-all] No encrypted tokens for user ${userId}, checking profiles...`);
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('tesla_access_token, tesla_refresh_token, tesla_token_expires_at')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (profile?.tesla_access_token) {
-    console.log(`[tesla-sync-all] Found plaintext tokens for user ${userId}, migrating...`);
-    
-    try {
-      const encryptedAccessToken = await encryptToken(profile.tesla_access_token);
-      const encryptedRefreshToken = profile.tesla_refresh_token 
-        ? await encryptToken(profile.tesla_refresh_token)
-        : null;
-      
-      await supabase.rpc('store_encrypted_tesla_tokens', {
-        p_user_id: userId,
-        p_encrypted_access_token: encryptedAccessToken,
-        p_encrypted_refresh_token: encryptedRefreshToken,
-        p_expires_at: profile.tesla_token_expires_at
-      });
-
-      console.log(`[tesla-sync-all] Token migration successful for user ${userId}`);
-    } catch (error) {
-      console.error(`[tesla-sync-all] Token migration failed for user ${userId}:`, error);
-    }
-
-    return { 
-      accessToken: profile.tesla_access_token, 
-      refreshToken: profile.tesla_refresh_token,
-      expiresAt: profile.tesla_token_expires_at ? new Date(profile.tesla_token_expires_at) : null
-    };
-  }
-
+  console.log(`[tesla-sync-all] No vault tokens for user ${userId}, no fallback available`);
   return { accessToken: null, refreshToken: null, expiresAt: null };
 }
 
@@ -857,11 +823,11 @@ async function getValidAccessToken(
   if (!accessToken) {
     return { token: null, refreshed: false };
   }
-  
+
   const bufferTime = 5 * 60 * 1000;
   if (expiresAt && expiresAt.getTime() - bufferTime < Date.now()) {
     console.log(`[tesla-sync-all] Token expired for user ${userId}, refreshing...`);
-    
+
     if (!refreshToken) {
       console.error(`[tesla-sync-all] No refresh token for user ${userId}`);
       return { token: null, refreshed: false };
@@ -888,21 +854,20 @@ async function getValidAccessToken(
       const tokens = await refreshResponse.json();
 
       const newExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
-      const newEncryptedAccessToken = await encryptToken(tokens.access_token);
-      const newEncryptedRefreshToken = await encryptToken(tokens.refresh_token);
-      
-      await supabase.rpc('store_encrypted_tesla_tokens', {
+
+      // Store refreshed tokens back in pgsodium vault
+      await supabase.rpc('store_tesla_tokens', {
         p_user_id: userId,
-        p_encrypted_access_token: newEncryptedAccessToken,
-        p_encrypted_refresh_token: newEncryptedRefreshToken,
-        p_expires_at: newExpiresAt
+        p_access_token: tokens.access_token,
+        p_refresh_token: tokens.refresh_token,
+        p_expires_at: newExpiresAt,
       });
 
       await logAuditEvent(supabase, userId, 'TOKEN_REFRESH', 'tesla_auth', undefined, { success: true });
 
-      console.log(`[tesla-sync-all] Token refreshed for user ${userId}`);
+      console.log(`[tesla-sync-all] Token refreshed and stored for user ${userId}`);
       return { token: tokens.access_token, refreshed: true };
-      
+
     } catch (error) {
       console.error(`[tesla-sync-all] Token refresh error for user ${userId}:`, error);
       return { token: null, refreshed: false };
@@ -948,21 +913,16 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get all users with Tesla tokens (from encrypted_tesla_tokens OR profiles)
-    const { data: encryptedUsers } = await supabase
-      .from('encrypted_tesla_tokens')
+    // Get all users who have an active vehicle (meaning they've connected Tesla)
+    // Tokens are stored in pgsodium vault; we identify users via the vehicles table
+    const { data: activeVehicleUsers } = await supabase
+      .from('vehicles')
       .select('user_id')
-      .not('encrypted_access_token', 'is', null);
+      .eq('is_active', true);
 
-    const { data: profileUsers } = await supabase
-      .from('profiles')
-      .select('user_id')
-      .not('tesla_access_token', 'is', null);
-
-    // Combine unique user IDs
+    // Deduplicate user IDs
     const userIds = new Set<string>();
-    encryptedUsers?.forEach(u => userIds.add(u.user_id));
-    profileUsers?.forEach(u => userIds.add(u.user_id));
+    activeVehicleUsers?.forEach((v: { user_id: string }) => userIds.add(v.user_id));
 
     console.log(`[tesla-sync-all] Found ${userIds.size} users with Tesla tokens`);
 
@@ -975,7 +935,7 @@ serve(async (req) => {
       try {
         console.log(`[tesla-sync-all] Processing user ${userId}`);
         
-        const { accessToken, refreshToken, expiresAt } = await getTokensWithFallback(supabase, userId);
+        const { accessToken, refreshToken, expiresAt } = await getTokensFromVault(supabase, userId);
         
         if (!accessToken) {
           console.log(`[tesla-sync-all] No valid tokens for user ${userId}`);

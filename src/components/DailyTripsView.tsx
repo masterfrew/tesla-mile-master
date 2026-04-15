@@ -278,7 +278,7 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 px-3 py-3">
 
       {/* Totalen + export */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -316,47 +316,65 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
       </div>
 
       {/* Dag groepen */}
-      {dayGroups.map((day) => (
+      {dayGroups.map((day) => {
+        const dayDate = new Date(day.dateKey.split('-').reverse().join('-'));
+        const dayDateFormatted = dayDate.toLocaleDateString('nl-NL', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+
+        return (
         <Card key={day.dateKey} className="overflow-hidden">
           <Collapsible open={openDays.has(day.dateKey)} onOpenChange={() => toggleDay(day.dateKey)}>
 
+            {/* Day header - full width, tappable */}
             <CollapsibleTrigger asChild>
               <button className="w-full text-left">
-                <div className="flex items-center justify-between px-4 py-3 hover:bg-accent/30 transition-colors">
-                  <div className="flex items-center gap-3">
-                    {openDays.has(day.dateKey)
-                      ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                      : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
-                    <div>
-                      <p className="font-semibold capitalize text-sm">{day.label}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {day.trips.length} rit{day.trips.length !== 1 ? 'ten' : ''}
-                      </p>
+                <div className="px-3 py-4 hover:bg-accent/30 transition-colors border-b">
+                  <div className="flex items-baseline justify-between gap-3 mb-2">
+                    <div className="flex-1">
+                      <p className="text-2xl font-bold">{dayDateFormatted}</p>
+                      <p className="text-sm text-muted-foreground capitalize mt-0.5">{day.label}</p>
                     </div>
+                    {openDays.has(day.dateKey)
+                      ? <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0 mt-1" />
+                      : <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 mt-1" />}
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap justify-end">
+
+                  {/* Total km prominent in header */}
+                  <div className="flex items-center gap-3 flex-wrap mb-2">
+                    <span className="text-lg font-bold text-primary">
+                      {day.totalKm.toLocaleString('nl-NL')} km
+                    </span>
                     {day.businessKm > 0 && (
                       <Badge variant="default" className="text-xs gap-1">
                         <Briefcase className="h-3 w-3" />
-                        {day.businessKm.toLocaleString('nl-NL')} km
+                        Zakelijk
                       </Badge>
                     )}
                     {day.personalKm > 0 && (
                       <Badge variant="secondary" className="text-xs gap-1">
                         <User className="h-3 w-3" />
-                        {day.personalKm.toLocaleString('nl-NL')} km
+                        Privé
                       </Badge>
                     )}
-                    <span className="font-bold text-primary text-sm">
-                      {day.totalKm.toLocaleString('nl-NL')} km
-                    </span>
                   </div>
+
+                  {/* Day summary */}
+                  <p className="text-xs text-muted-foreground">
+                    {day.trips.length} rit{day.trips.length !== 1 ? 'ten' : ''} ·
+                    {day.businessKm > 0 && <> {day.businessKm.toLocaleString('nl-NL')} km zakelijk</>}
+                    {day.businessKm > 0 && day.personalKm > 0 && ' · '}
+                    {day.personalKm > 0 && <> {day.personalKm.toLocaleString('nl-NL')} km privé</>}
+                  </p>
                 </div>
               </button>
             </CollapsibleTrigger>
 
+            {/* Trips list */}
             <CollapsibleContent>
-              <div className="border-t divide-y">
+              <div className="divide-y">
                 {day.trips.map((trip) => {
                   const distance = trip.end_odometer_km
                     ? trip.end_odometer_km - trip.start_odometer_km
@@ -365,107 +383,109 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
                   const isBiz = trip.purpose === 'business';
                   const isEditingPurpose = editState?.tripId === trip.id && editState.field === 'purpose';
                   const isEditingDesc = editState?.tripId === trip.id && editState.field === 'description';
+                  const hasStartLocation = trip.start_location && trip.start_location.trim() !== '';
+                  const hasEndLocation = trip.end_location && trip.end_location.trim() !== '';
 
                   return (
-                    <div key={trip.id} className="px-4 py-4 pl-11 hover:bg-accent/10 transition-colors">
-                      <div className="flex items-start gap-4">
+                    <div key={trip.id} className="px-3 py-3 hover:bg-accent/10 transition-colors">
+                      <div className="flex gap-3">
 
-                        {/* Links: route + meta */}
+                        {/* Route indicator column (left) */}
+                        <div className="flex flex-col items-center gap-0.5 shrink-0 pt-1">
+                          <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                          <div className="w-px flex-1 bg-border min-h-[32px]"></div>
+                          <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        </div>
+
+                        {/* Main content */}
                         <div className="flex-1 min-w-0 space-y-2">
 
-                          {/* Tijd + type badge */}
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Clock className="h-3 w-3" />
-                              <span>{formatTime(trip.started_at)}</span>
-                              {trip.ended_at && (
-                                <>
-                                  <ArrowRight className="h-3 w-3 mx-0.5" />
-                                  <span>{formatTime(trip.ended_at)}</span>
-                                </>
-                              )}
-                              {duration && (
-                                <span className="ml-1 text-muted-foreground/60">({duration})</span>
-                              )}
-                            </div>
-
-                            {/* Inline purpose toggle */}
-                            {isEditingPurpose ? (
-                              <div className="flex items-center gap-1">
-                                <Select
-                                  value={editState.value}
-                                  onValueChange={(v) => setEditState(prev => prev ? { ...prev, value: v } : null)}
-                                >
-                                  <SelectTrigger className="h-6 text-xs w-28">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="business">Zakelijk</SelectItem>
-                                    <SelectItem value="personal">Privé</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={saveEdit} disabled={!!savingId}>
-                                  {savingId === trip.id
-                                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                                    : <Check className="h-3 w-3 text-green-600" />}
-                                </Button>
-                                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={cancelEdit}>
-                                  <X className="h-3 w-3 text-red-500" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => startEdit(trip.id, 'purpose', trip.purpose)}
-                                className="group flex items-center gap-1"
-                                title="Klik om te wijzigen"
-                              >
-                                <Badge
-                                  variant={isBiz ? 'default' : 'secondary'}
-                                  className="text-xs cursor-pointer group-hover:opacity-80 transition-opacity"
-                                >
-                                  {isBiz
-                                    ? <><Briefcase className="h-2.5 w-2.5 mr-1" />Zakelijk</>
-                                    : <><User className="h-2.5 w-2.5 mr-1" />Privé</>}
-                                </Badge>
-                                <Edit3 className="h-3 w-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity" />
-                              </button>
-                            )}
-
-                            {trip.is_manual && (
-                              <Badge variant="outline" className="text-xs">Handmatig</Badge>
+                          {/* Time + duration */}
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground flex-wrap">
+                            <Clock className="h-3 w-3 shrink-0" />
+                            <span className="font-medium">{formatTime(trip.started_at)}</span>
+                            {trip.ended_at && (
+                              <>
+                                <ArrowRight className="h-3 w-3 shrink-0" />
+                                <span className="font-medium">{formatTime(trip.ended_at)}</span>
+                                {duration && (
+                                  <span className="text-muted-foreground/70">({duration})</span>
+                                )}
+                              </>
                             )}
                           </div>
 
-                          {/* Route: visuele lijn start → eind */}
-                          <div className="flex items-stretch gap-2">
-                            <div className="flex flex-col items-center gap-0.5 shrink-0 pt-0.5">
-                              <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                              <div className="w-px flex-1 bg-border min-h-[14px]"></div>
-                              <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                            </div>
-                            <div className="flex-1 space-y-1">
-                              <p className="text-sm font-medium leading-tight">
-                                {trip.start_location || (
-                                  <span className="text-muted-foreground italic text-xs">Startlocatie onbekend</span>
-                                )}
-                              </p>
-                              <p className="text-sm text-muted-foreground leading-tight">
-                                {trip.end_location || (
-                                  <span className="italic text-xs">Eindlocatie onbekend</span>
-                                )}
-                              </p>
-                            </div>
+                          {/* Locations */}
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium leading-snug break-words">
+                              {hasStartLocation ? (
+                                trip.start_location
+                              ) : (
+                                <span className="text-muted-foreground italic text-xs">Locatie onbekend</span>
+                              )}
+                            </p>
+                            <p className="text-sm text-muted-foreground leading-snug break-words">
+                              {hasEndLocation ? (
+                                trip.end_location
+                              ) : (
+                                <span className="italic text-xs">Locatie onbekend</span>
+                              )}
+                            </p>
                           </div>
 
-                          {/* Voertuig + omschrijving */}
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Car className="h-3 w-3" />
-                              {trip.vehicle?.display_name || 'Tesla'}
-                            </span>
+                          {/* Purpose + Manual badge + Description */}
+                          <div className="flex flex-col gap-2 pt-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {/* Purpose badge (inline editable) */}
+                              {isEditingPurpose ? (
+                                <div className="flex items-center gap-1">
+                                  <Select
+                                    value={editState.value}
+                                    onValueChange={(v) => setEditState(prev => prev ? { ...prev, value: v } : null)}
+                                  >
+                                    <SelectTrigger className="h-6 text-xs w-28">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="business">Zakelijk</SelectItem>
+                                      <SelectItem value="personal">Privé</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={saveEdit} disabled={!!savingId}>
+                                    {savingId === trip.id
+                                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                                      : <Check className="h-3 w-3 text-green-600" />}
+                                  </Button>
+                                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={cancelEdit}>
+                                    <X className="h-3 w-3 text-red-500" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => startEdit(trip.id, 'purpose', trip.purpose)}
+                                  className="group flex items-center gap-1"
+                                  title="Klik om te wijzigen"
+                                >
+                                  <Badge
+                                    variant={isBiz ? 'default' : 'secondary'}
+                                    className="text-xs cursor-pointer group-hover:opacity-80 transition-opacity"
+                                  >
+                                    {isBiz
+                                      ? <><Briefcase className="h-2.5 w-2.5 mr-1" />Zakelijk</>
+                                      : <><User className="h-2.5 w-2.5 mr-1" />Privé</>}
+                                  </Badge>
+                                  <Edit3 className="h-3 w-3 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </button>
+                              )}
 
+                              {trip.is_manual && (
+                                <Badge variant="outline" className="text-xs">Handmatig</Badge>
+                              )}
+                            </div>
+
+                            {/* Description (inline editable) */}
                             {isEditingDesc ? (
-                              <div className="flex items-center gap-1 flex-1 min-w-0">
+                              <div className="flex items-center gap-1">
                                 <Input
                                   value={editState.value}
                                   onChange={(e) => setEditState(prev => prev ? { ...prev, value: e.target.value } : null)}
@@ -489,38 +509,49 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
                             ) : (
                               <button
                                 onClick={() => startEdit(trip.id, 'description', trip.description || '')}
-                                className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                className="group text-xs text-muted-foreground hover:text-foreground transition-colors text-left"
                               >
-                                {trip.description
-                                  ? <span className="italic">"{trip.description}"</span>
-                                  : <span className="opacity-40">+ omschrijving</span>}
-                                <Edit3 className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <span className="flex items-center gap-1">
+                                  {trip.description
+                                    ? <span className="italic break-words">"{trip.description}"</span>
+                                    : <span className="opacity-40">+ omschrijving</span>}
+                                  <Edit3 className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                                </span>
                               </button>
+                            )}
+                          </div>
+
+                          {/* Vehicle + Maps link */}
+                          <div className="flex items-center gap-2 flex-wrap pt-1 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Car className="h-3 w-3" />
+                              {trip.vehicle?.display_name || 'Tesla'}
+                            </span>
+                            {trip.start_location && trip.end_location && (
+                              <a
+                                href={`https://www.google.com/maps/dir/${encodeURIComponent(trip.start_location)}/${encodeURIComponent(trip.end_location)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary hover:underline flex items-center gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Navigation className="h-3 w-3" />
+                                Route
+                              </a>
                             )}
                           </div>
                         </div>
 
-                        {/* Rechts: km + route link */}
-                        <div className="text-right shrink-0">
-                          <div className="text-xl font-bold text-primary">
-                            {distance > 0 ? `${distance.toLocaleString('nl-NL')} km` : '—'}
+                        {/* Right column: distance */}
+                        <div className="flex flex-col items-end shrink-0 pt-1">
+                          <div className="text-2xl font-bold text-primary">
+                            {distance > 0 ? distance : '—'}
                           </div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {trip.start_odometer_km.toLocaleString('nl-NL')}
-                            {trip.end_odometer_km && <> → {trip.end_odometer_km.toLocaleString('nl-NL')}</>}
+                          <div className="text-xs text-muted-foreground">km</div>
+                          <div className="text-xs text-muted-foreground mt-2 text-right">
+                            <div>{trip.start_odometer_km.toLocaleString('nl-NL')}</div>
+                            {trip.end_odometer_km && <div>{trip.end_odometer_km.toLocaleString('nl-NL')}</div>}
                           </div>
-                          {trip.start_location && trip.end_location && (
-                            <a
-                              href={`https://www.google.com/maps/dir/${encodeURIComponent(trip.start_location)}/${encodeURIComponent(trip.end_location)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-primary hover:underline flex items-center justify-end gap-1 mt-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Navigation className="h-3 w-3" />
-                              Route
-                            </a>
-                          )}
                         </div>
 
                       </div>
@@ -532,7 +563,8 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
 
           </Collapsible>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 };
