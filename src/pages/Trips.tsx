@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { ManualTripForm } from '@/components/ManualTripForm';
+import { MonthlyPdfReport } from '@/components/MonthlyPdfReport';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 interface Vehicle {
