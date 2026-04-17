@@ -1,5 +1,6 @@
 import { create, getNumericDate } from "https://deno.land/x/djwt@v2.8/mod.ts";
-import type { Algorithm } from "https://deno.land/x/djwt@v2.8/mod.ts";
+
+type Algorithm = "RS256";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 

@@ -104,9 +104,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in tesla-vehicles:', error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('Error in tesla-vehicles:', msg);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: msg }),
       { 
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
