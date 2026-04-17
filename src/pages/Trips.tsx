@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { ManualTripForm } from '@/components/ManualTripForm';
+import { MonthlyPdfReport } from '@/components/MonthlyPdfReport';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 interface Vehicle {
@@ -139,6 +140,7 @@ const Trips = () => {
                 />
               </DialogContent>
             </Dialog>
+            <MonthlyPdfReport vehicles={vehicles} />
             <Button onClick={handleSync} disabled={isSyncing} variant="outline">
               <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Sync...' : 'Sync Tesla'}
