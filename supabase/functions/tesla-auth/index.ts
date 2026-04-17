@@ -147,9 +147,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('[tesla-auth] FATAL_ERROR:', error.message);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[tesla-auth] FATAL_ERROR:', msg);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: msg }),
       { 
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
