@@ -140,6 +140,7 @@ const Trips = () => {
                 />
               </DialogContent>
             </Dialog>
+            <MonthlyPdfReport vehicles={vehicles} />
             <Button onClick={handleSync} disabled={isSyncing} variant="outline">
               <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Sync...' : 'Sync Tesla'}
