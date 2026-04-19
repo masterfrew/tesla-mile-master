@@ -133,9 +133,8 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
 
       const groups: Record<string, Trip[]> = {};
       for (const trip of (data || []) as Trip[]) {
-        const dateKey = new Date(trip.started_at).toLocaleDateString('nl-NL', {
-          year: 'numeric', month: '2-digit', day: '2-digit',
-        });
+        const d = new Date(trip.started_at);
+        const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         if (!groups[dateKey]) groups[dateKey] = [];
         groups[dateKey].push(trip);
       }
@@ -317,11 +316,9 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
 
       {/* Dag groepen */}
       {dayGroups.map((day) => {
-        const dayDate = new Date(day.dateKey.split('-').reverse().join('-'));
+        const dayDate = new Date(day.trips[0].started_at);
         const dayDateFormatted = dayDate.toLocaleDateString('nl-NL', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric'
+          day: '2-digit', month: '2-digit', year: 'numeric',
         });
 
         return (

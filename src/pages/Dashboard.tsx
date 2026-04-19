@@ -231,26 +231,16 @@ const Dashboard: React.FC = () => {
     if (!deleteVehicleId) return;
 
     try {
-      // First delete all mileage readings for this vehicle
-      const { error: mileageError } = await supabase
-        .from('mileage_readings')
-        .delete()
-        .eq('vehicle_id', deleteVehicleId);
-
-      if (mileageError) throw mileageError;
-
-      // Then delete the vehicle
-      const { error: vehicleError } = await supabase
+      const { error } = await supabase
         .from('vehicles')
-        .delete()
+        .update({ is_active: false })
         .eq('id', deleteVehicleId);
 
-      if (vehicleError) throw vehicleError;
+      if (error) throw error;
 
       toast.success('Voertuig verwijderd');
       setDeleteVehicleId(null);
-      
-      // Refresh data
+
       await fetchVehicles();
       await fetchMileageStats();
     } catch (error) {

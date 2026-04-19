@@ -34,7 +34,7 @@ const tripSchema = z.object({
   start_location: z.string().min(1, 'Startlocatie is verplicht'),
   end_location: z.string().min(1, 'Eindlocatie is verplicht'),
   start_odometer_km: z.coerce.number().min(0, 'Kilometerstand moet positief zijn'),
-  end_odometer_km: z.coerce.number().min(0, 'Kilometerstand moet positief zijn'),
+  end_odometer_km: z.union([z.coerce.number().min(0, 'Kilometerstand moet positief zijn'), z.literal('')]).optional(),
   purpose: z.enum(['business', 'personal']),
   description: z.string().optional(),
 });
@@ -107,7 +107,7 @@ export const EditTripDialog: React.FC<EditTripDialogProps> = ({
         start_location: trip.start_location || '',
         end_location: trip.end_location || '',
         start_odometer_km: trip.start_odometer_km,
-        end_odometer_km: trip.end_odometer_km || 0,
+        end_odometer_km: trip.end_odometer_km ?? undefined,
         purpose: (trip.purpose as 'business' | 'personal') || 'business',
         description: trip.description || '',
       });
@@ -117,7 +117,7 @@ export const EditTripDialog: React.FC<EditTripDialogProps> = ({
   const onSubmit = async (data: TripFormData) => {
     if (!trip) return;
 
-    if (data.end_odometer_km < data.start_odometer_km) {
+    if (data.end_odometer_km !== undefined && data.end_odometer_km !== '' && (data.end_odometer_km as number) < data.start_odometer_km) {
       toast.error('Eind kilometerstand moet hoger zijn dan start');
       return;
     }
@@ -137,7 +137,7 @@ export const EditTripDialog: React.FC<EditTripDialogProps> = ({
           start_location: data.start_location,
           end_location: data.end_location,
           start_odometer_km: data.start_odometer_km,
-          end_odometer_km: data.end_odometer_km,
+          end_odometer_km: data.end_odometer_km !== undefined && data.end_odometer_km !== '' ? (data.end_odometer_km as number) : null,
           purpose: data.purpose,
           description: data.description || null,
         })
@@ -153,7 +153,8 @@ export const EditTripDialog: React.FC<EditTripDialogProps> = ({
     }
   };
 
-  const calculatedDistance = form.watch('end_odometer_km') - form.watch('start_odometer_km');
+  const endOdo = form.watch('end_odometer_km');
+  const calculatedDistance = endOdo !== undefined && endOdo !== '' ? (endOdo as number) - form.watch('start_odometer_km') : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -352,7 +353,7 @@ export const EditTripDialog: React.FC<EditTripDialogProps> = ({
               <div className="space-y-2">
                 <Label>Afstand</Label>
                 <div className="h-10 flex items-center px-3 bg-muted rounded-md font-semibold">
-                  {calculatedDistance > 0 ? `${calculatedDistance} km` : '—'}
+                  {calculatedDistance !== null && calculatedDistance > 0 ? `${calculatedDistance} km` : '—'}
                 </div>
               </div>
             </div>
