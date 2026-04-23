@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { TripsList } from '@/components/TripsList';
-import { NewTripsList } from '@/components/NewTripsList';
 import { DailyTripsView } from '@/components/DailyTripsView';
 import { TripsCalendar } from '@/components/TripsCalendar';
+import { TripsTable } from '@/components/TripsTable';
 import { supabase } from '@/integrations/supabase/client';
 import { Car, ArrowLeft, RefreshCw, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -25,6 +24,37 @@ interface Vehicle {
   year: number;
 }
 
+// Returns YYYY-MM-DD string in local time
+function toLocalDate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+type PeriodPreset = 'week' | 'month' | 'year' | 'custom';
+
+function getPresetDates(preset: PeriodPreset): { start: string; end: string } {
+  const now = new Date();
+  const today = toLocalDate(now);
+
+  if (preset === 'week') {
+    const dayOfWeek = now.getDay(); // 0 = sun
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7));
+    return { start: toLocalDate(monday), end: today };
+  }
+  if (preset === 'month') {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: toLocalDate(first), end: today };
+  }
+  if (preset === 'year') {
+    const first = new Date(now.getFullYear(), 0, 1);
+    return { start: toLocalDate(first), end: today };
+  }
+  return { start: '', end: '' };
+}
+
 const Trips = () => {
   const { user } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -37,6 +67,24 @@ const Trips = () => {
   const [selectedPurpose, setSelectedPurpose] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [activePeriod, setActivePeriod] = useState<PeriodPreset | null>(null);
+
+  const applyPreset = (preset: PeriodPreset) => {
+    if (preset === 'custom') {
+      setActivePeriod('custom');
+      return;
+    }
+    const { start, end } = getPresetDates(preset);
+    setStartDate(start);
+    setEndDate(end);
+    setActivePeriod(preset);
+  };
+
+  const clearDates = () => {
+    setStartDate('');
+    setEndDate('');
+    setActivePeriod(null);
+  };
 
   const fetchVehicles = async () => {
     if (!user) return;
@@ -96,18 +144,16 @@ const Trips = () => {
     );
   }
 
-  const filters = {
+  const tableFilters = {
     vehicleId: selectedVehicle,
     purpose: selectedPurpose,
     startDate,
     endDate,
-    startTime: '',
-    endTime: '',
   };
 
   return (
     <div className="min-h-screen bg-background p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-4">
@@ -115,14 +161,14 @@ const Trips = () => {
               <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
             </Link>
             <div>
-              <h1 className="text-3xl font-bold">Ritregistratie</h1>
-              <p className="text-muted-foreground">Alle ritten op een rij</p>
+              <h1 className="text-2xl font-bold">Ritregistratie</h1>
+              <p className="text-sm text-muted-foreground">Kilometerregistratie overzicht</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Dialog open={addTripOpen} onOpenChange={setAddTripOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" size="sm">
                   <Plus className="h-4 w-4 mr-2" />
                   Rit toevoegen
                 </Button>
@@ -141,7 +187,7 @@ const Trips = () => {
               </DialogContent>
             </Dialog>
             <MonthlyPdfReport vehicles={vehicles} />
-            <Button onClick={handleSync} disabled={isSyncing} variant="outline">
+            <Button onClick={handleSync} disabled={isSyncing} variant="outline" size="sm">
               <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Sync...' : 'Sync Tesla'}
             </Button>
@@ -150,12 +196,42 @@ const Trips = () => {
 
         {/* Filters */}
         <Card>
-          <CardContent className="pt-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <CardContent className="pt-4 space-y-3">
+            {/* Periode presets */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground font-medium mr-1">Periode:</span>
+              {(['week', 'month', 'year'] as const).map(p => {
+                const labels: Record<string, string> = { week: 'Deze week', month: 'Deze maand', year: 'Dit jaar' };
+                return (
+                  <Button
+                    key={p}
+                    variant={activePeriod === p ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 px-3 text-xs"
+                    onClick={() => applyPreset(p)}
+                  >
+                    {labels[p]}
+                  </Button>
+                );
+              })}
+              {(startDate || endDate) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-3 text-xs text-muted-foreground"
+                  onClick={clearDates}
+                >
+                  Wis filter
+                </Button>
+              )}
+            </div>
+
+            {/* Filters row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Voertuig</Label>
                 <Select value={selectedVehicle} onValueChange={setSelectedVehicle}>
-                  <SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -169,7 +245,7 @@ const Trips = () => {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Type rit</Label>
                 <Select value={selectedPurpose} onValueChange={setSelectedPurpose}>
-                  <SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -181,28 +257,40 @@ const Trips = () => {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Vanaf datum</Label>
-                <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                <Input
+                  type="date"
+                  className="h-8 text-sm"
+                  value={startDate}
+                  onChange={e => { setStartDate(e.target.value); setActivePeriod('custom'); }}
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Tot datum</Label>
-                <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                <Input
+                  type="date"
+                  className="h-8 text-sm"
+                  value={endDate}
+                  onChange={e => { setEndDate(e.target.value); setActivePeriod('custom'); }}
+                />
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Main tabs */}
-        <Tabs defaultValue="daily">
+        <Tabs defaultValue="table">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="daily">📋 Dagrapport</TabsTrigger>
-            <TabsTrigger value="all">📄 Alle ritten</TabsTrigger>
-            <TabsTrigger value="calendar">📅 Kalender</TabsTrigger>
+            <TabsTrigger value="table">Rittenlijst</TabsTrigger>
+            <TabsTrigger value="daily">Dagrapport</TabsTrigger>
+            <TabsTrigger value="calendar">Kalender</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="calendar" className="mt-4">
-            <TripsCalendar
+          <TabsContent value="table" className="mt-4">
+            <TripsTable
               refreshTrigger={refreshTrigger}
-              filters={{ vehicleId: selectedVehicle }}
+              vehicles={vehicles}
+              filters={tableFilters}
+              onTripChanged={() => setRefreshTrigger(prev => prev + 1)}
             />
           </TabsContent>
 
@@ -218,11 +306,10 @@ const Trips = () => {
             />
           </TabsContent>
 
-          <TabsContent value="all" className="mt-4">
-            <NewTripsList
+          <TabsContent value="calendar" className="mt-4">
+            <TripsCalendar
               refreshTrigger={refreshTrigger}
-              vehicles={vehicles}
-              filters={filters}
+              filters={{ vehicleId: selectedVehicle }}
             />
           </TabsContent>
         </Tabs>
