@@ -67,8 +67,19 @@ serve(async (req) => {
       console.error('[tesla-disconnect] Error marking vehicles inactive:', vehiclesError);
     }
 
-    // Clear Tesla tokens from profile
-    console.log('[tesla-disconnect] Clearing Tesla tokens...');
+    // Clear Tesla tokens from pgsodium vault
+    console.log('[tesla-disconnect] Clearing vault tokens...');
+    const { error: vaultError } = await supabaseAdmin.rpc('delete_tesla_tokens', {
+      p_user_id: user.id,
+    });
+
+    if (vaultError) {
+      // Log but don't block the disconnect – vault entry may not exist
+      console.warn('[tesla-disconnect] Vault token deletion warning:', vaultError.message);
+    }
+
+    // Also clear legacy token columns from profiles (belt-and-braces)
+    console.log('[tesla-disconnect] Clearing profile token columns...');
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .update({
@@ -79,7 +90,7 @@ serve(async (req) => {
       .eq('user_id', user.id);
 
     if (profileError) {
-      console.error('[tesla-disconnect] Error clearing tokens:', profileError);
+      console.error('[tesla-disconnect] Error clearing profile tokens:', profileError);
       return new Response(
         JSON.stringify({ error: 'Failed to disconnect Tesla account' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

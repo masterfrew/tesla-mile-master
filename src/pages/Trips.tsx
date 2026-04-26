@@ -109,18 +109,35 @@ const Trips = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { toast.error('Je moet ingelogd zijn om te synchroniseren'); return; }
 
+      // Step 1: sync latest Tesla data
       const response = await supabase.functions.invoke('tesla-mileage', {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (response.error) throw new Error(response.error.message);
 
-      const result = response.data;
-      if (result.synced > 0) {
-        toast.success(`${result.synced} voertuig(en) gesynchroniseerd`);
-        setRefreshTrigger(prev => prev + 1);
+      // Step 2: fill in trips for any historical mileage readings without a trip record
+      const backfillResponse = await supabase.functions.invoke('backfill-trips', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      const syncResult = response.data;
+      const backfillResult = backfillResponse.data;
+
+      const parts: string[] = [];
+      if (syncResult?.synced > 0) {
+        parts.push(`${syncResult.synced} voertuig(en) gesynchroniseerd`);
+      }
+      if (backfillResult?.created > 0) {
+        parts.push(`${backfillResult.created} ontbrekende rit(ten) aangevuld`);
+      }
+
+      if (parts.length > 0) {
+        toast.success(parts.join(' · '));
       } else {
         toast.info('Geen nieuwe data om te synchroniseren');
       }
+
+      setRefreshTrigger(prev => prev + 1);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       toast.error(`Synchronisatie mislukt: ${msg}`);
@@ -278,7 +295,7 @@ const Trips = () => {
         </Card>
 
         {/* Main tabs */}
-        <Tabs defaultValue="table">
+        <Tabs defaultValue="daily">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="table">Rittenlijst</TabsTrigger>
             <TabsTrigger value="daily">Dagrapport</TabsTrigger>
