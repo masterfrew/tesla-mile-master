@@ -612,7 +612,7 @@ async function syncUserVehicles(
         }
       }
 
-      // UPSERT today's reading as a snapshot of current odometer
+      // UPSERT today's reading with the actual km driven today
       const { error: upsertError } = await supabase
         .from('mileage_readings')
         .upsert(
@@ -621,7 +621,7 @@ async function syncUserVehicles(
             user_id: userId,
             reading_date: today,
             odometer_km: odometerKm,
-            daily_km: 0, // Will be updated tomorrow
+            daily_km: dailyKm, // Attribute to today so trips show on the correct date
             location_name: locationName,
             metadata: {
               synced_at: now.toISOString(),
@@ -659,11 +659,11 @@ async function syncUserVehicles(
         });
 
         // ── Create or update trip record in the `trips` table ──
-        // This gives the frontend rich start/end location data for each day's driving.
+        // Use today's date so trips appear on the day they actually happened.
         await upsertDailyTrip(supabase, {
           vehicleId: vehicle.id,
           userId,
-          date: baseSnapshot?.reading_date || today,
+          date: today,
           startOdometer: baseOdometer,
           endOdometer: odometerKm,
           dailyKm,
