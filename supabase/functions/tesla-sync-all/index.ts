@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
 import { appendToSheet } from '../_shared/sheets.ts';
 import { reverseGeocode } from '../_shared/geocoding.ts';
+import { decryptToken, encryptToken } from '../_shared/encryption.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -777,38 +778,40 @@ async function syncUserVehicles(
   return { synced, failed, offline, errors };
 }
 
-// Get tokens from the pgsodium vault (store_tesla_tokens / get_tesla_access_token RPCs).
-// Falls back to profiles table for any users who haven't reconnected yet.
+// Get tokens from encrypted_tesla_tokens table, decrypt with TOKEN_ENCRYPTION_KEY.
 async function getTokensFromVault(
   supabase: any,
   userId: string
 ): Promise<{ accessToken: string | null; refreshToken: string | null; expiresAt: Date | null }> {
+  try {
+    const { data: rows, error } = await supabase.rpc('get_encrypted_tesla_tokens', {
+      p_user_id: userId,
+    });
 
-  // Primary: pgsodium vault via RPC (set by tesla-auth)
-  const { data: accessToken, error: atError } = await supabase.rpc('get_tesla_access_token', {
-    p_user_id: userId,
-  });
-  const { data: refreshToken, error: rtError } = await supabase.rpc('get_tesla_refresh_token', {
-    p_user_id: userId,
-  });
+    if (error || !rows || rows.length === 0) {
+      console.log(`[tesla-sync-all] No encrypted tokens found for user ${userId}`);
+      return { accessToken: null, refreshToken: null, expiresAt: null };
+    }
 
-  if (!atError && accessToken) {
-    // Get expiry from profiles (non-sensitive column)
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('tesla_token_expires_at')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const row = rows[0];
 
-    const expiresAt = profile?.tesla_token_expires_at
-      ? new Date(profile.tesla_token_expires_at)
-      : null;
+    let accessToken: string | null = null;
+    let refreshToken: string | null = null;
 
-    return { accessToken, refreshToken: refreshToken || null, expiresAt };
+    try {
+      if (row.encrypted_access_token) accessToken = await decryptToken(row.encrypted_access_token);
+      if (row.encrypted_refresh_token) refreshToken = await decryptToken(row.encrypted_refresh_token);
+    } catch (decErr) {
+      console.error(`[tesla-sync-all] Decryption failed for user ${userId}:`, decErr);
+      return { accessToken: null, refreshToken: null, expiresAt: null };
+    }
+
+    const expiresAt = row.token_expires_at ? new Date(row.token_expires_at) : null;
+    return { accessToken, refreshToken, expiresAt };
+  } catch (err) {
+    console.error(`[tesla-sync-all] getTokensFromVault error for user ${userId}:`, err);
+    return { accessToken: null, refreshToken: null, expiresAt: null };
   }
-
-  console.log(`[tesla-sync-all] No vault tokens for user ${userId}, no fallback available`);
-  return { accessToken: null, refreshToken: null, expiresAt: null };
 }
 
 async function getValidAccessToken(
@@ -855,13 +858,18 @@ async function getValidAccessToken(
 
       const newExpiresAt = new Date(Date.now() + (tokens.expires_in * 1000)).toISOString();
 
-      // Store refreshed tokens back in pgsodium vault
-      await supabase.rpc('store_tesla_tokens', {
+      // Encrypt and store refreshed tokens back in encrypted_tesla_tokens table
+      await supabase.rpc('store_encrypted_tesla_tokens', {
         p_user_id: userId,
-        p_access_token: tokens.access_token,
-        p_refresh_token: tokens.refresh_token,
+        p_encrypted_access_token: await encryptToken(tokens.access_token),
+        p_encrypted_refresh_token: await encryptToken(tokens.refresh_token),
         p_expires_at: newExpiresAt,
       });
+      // Also update expiry in profiles for quick status checks
+      await supabase
+        .from('profiles')
+        .update({ tesla_token_expires_at: newExpiresAt, updated_at: new Date().toISOString() })
+        .eq('user_id', userId);
 
       await logAuditEvent(supabase, userId, 'TOKEN_REFRESH', 'tesla_auth', undefined, { success: true });
 

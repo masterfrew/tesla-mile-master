@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
 import { reverseGeocode } from '../_shared/geocoding.ts';
+import { decryptToken } from '../_shared/encryption.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -168,13 +169,27 @@ serve(async (req) => {
 
     console.log('[tesla-mileage] User:', user.id);
 
-    // Get access token from pgsodium vault
-    const { data: accessToken, error: tokenError } = await supabase.rpc('get_tesla_access_token', {
+    // Get access token from encrypted_tesla_tokens table
+    const { data: encRows, error: tokenError } = await supabase.rpc('get_encrypted_tesla_tokens', {
       p_user_id: user.id,
     });
 
-    if (tokenError || !accessToken) {
-      console.error('[tesla-mileage] No vault token:', tokenError);
+    if (tokenError || !encRows || encRows.length === 0) {
+      console.error('[tesla-mileage] No encrypted token found:', tokenError);
+      throw new Error('No Tesla access token found. Please reconnect your Tesla account.');
+    }
+
+    let accessToken: string | null = null;
+    try {
+      accessToken = encRows[0].encrypted_access_token
+        ? await decryptToken(encRows[0].encrypted_access_token)
+        : null;
+    } catch (decErr) {
+      console.error('[tesla-mileage] Token decryption failed:', decErr);
+    }
+
+    if (!accessToken) {
+      console.error('[tesla-mileage] Could not decrypt access token');
       throw new Error('No Tesla access token found. Please reconnect your Tesla account.');
     }
 
