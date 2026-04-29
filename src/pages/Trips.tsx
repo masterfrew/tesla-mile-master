@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DailyTripsView } from '@/components/DailyTripsView';
-import { TripsCalendar } from '@/components/TripsCalendar';
 import { TripsTable } from '@/components/TripsTable';
 import { supabase } from '@/integrations/supabase/client';
-import { Car, ArrowLeft, RefreshCw, Plus } from 'lucide-react';
+import { Car, RefreshCw, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Link } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -16,6 +14,7 @@ import { toast } from 'sonner';
 import { ManualTripForm } from '@/components/ManualTripForm';
 import { MonthlyPdfReport } from '@/components/MonthlyPdfReport';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AppNav } from '@/components/AppNav';
 
 interface Vehicle {
   id: string;
@@ -39,7 +38,7 @@ function getPresetDates(preset: PeriodPreset): { start: string; end: string } {
   const today = toLocalDate(now);
 
   if (preset === 'week') {
-    const dayOfWeek = now.getDay(); // 0 = sun
+    const dayOfWeek = now.getDay();
     const monday = new Date(now);
     monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7));
     return { start: toLocalDate(monday), end: today };
@@ -70,10 +69,7 @@ const Trips = () => {
   const [activePeriod, setActivePeriod] = useState<PeriodPreset | null>(null);
 
   const applyPreset = (preset: PeriodPreset) => {
-    if (preset === 'custom') {
-      setActivePeriod('custom');
-      return;
-    }
+    if (preset === 'custom') { setActivePeriod('custom'); return; }
     const { start, end } = getPresetDates(preset);
     setStartDate(start);
     setEndDate(end);
@@ -109,13 +105,12 @@ const Trips = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { toast.error('Je moet ingelogd zijn om te synchroniseren'); return; }
 
-      // Step 1: sync latest Tesla data
       const response = await supabase.functions.invoke('tesla-mileage', {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (response.error) throw new Error(response.error.message);
 
-      // Step 2: fill in trips for any historical mileage readings without a trip record
+      // Also backfill any missing trip records
       const backfillResponse = await supabase.functions.invoke('backfill-trips', {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
@@ -124,12 +119,8 @@ const Trips = () => {
       const backfillResult = backfillResponse.data;
 
       const parts: string[] = [];
-      if (syncResult?.synced > 0) {
-        parts.push(`${syncResult.synced} voertuig(en) gesynchroniseerd`);
-      }
-      if (backfillResult?.created > 0) {
-        parts.push(`${backfillResult.created} ontbrekende rit(ten) aangevuld`);
-      }
+      if (syncResult?.synced > 0) parts.push(`${syncResult.synced} voertuig(en) gesynchroniseerd`);
+      if (backfillResult?.created > 0) parts.push(`${backfillResult.created} ontbrekende rit(ten) aangevuld`);
 
       if (parts.length > 0) {
         toast.success(parts.join(' · '));
@@ -150,12 +141,13 @@ const Trips = () => {
 
   if (vehicles.length === 0) {
     return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto text-center py-16">
+      <div className="min-h-screen bg-background">
+        <AppNav />
+        <div className="max-w-4xl mx-auto text-center py-16 px-4">
           <Car className="h-16 w-16 mx-auto text-muted-foreground mb-6" />
           <h1 className="text-2xl font-bold mb-4">Geen voertuigen gevonden</h1>
-          <p className="text-muted-foreground mb-6">Verbind eerst je Tesla account.</p>
-          <Button onClick={() => window.history.back()}>Terug naar dashboard</Button>
+          <p className="text-muted-foreground mb-6">Verbind eerst je Tesla via het overzicht.</p>
+          <Button onClick={() => window.history.back()}>Terug</Button>
         </div>
       </div>
     );
@@ -169,24 +161,22 @@ const Trips = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="max-w-7xl mx-auto space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-4">
-            <Link to="/">
-              <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold">Ritregistratie</h1>
-              <p className="text-sm text-muted-foreground">Kilometerregistratie overzicht</p>
-            </div>
+    <div className="min-h-screen bg-background">
+      <AppNav />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 space-y-4">
+
+        {/* Page header */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-lg font-semibold">Ritten</h1>
+            <p className="text-sm text-muted-foreground">Kilometerregistratie overzicht</p>
           </div>
           <div className="flex items-center gap-2">
             <Dialog open={addTripOpen} onOpenChange={setAddTripOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
+                  <Plus className="h-4 w-4 mr-1.5" />
                   Rit toevoegen
                 </Button>
               </DialogTrigger>
@@ -205,7 +195,7 @@ const Trips = () => {
             </Dialog>
             <MonthlyPdfReport vehicles={vehicles} />
             <Button onClick={handleSync} disabled={isSyncing} variant="outline" size="sm">
-              <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 mr-1.5 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Sync...' : 'Sync Tesla'}
             </Button>
           </div>
@@ -213,10 +203,10 @@ const Trips = () => {
 
         {/* Filters */}
         <Card>
-          <CardContent className="pt-4 space-y-3">
-            {/* Periode presets */}
+          <CardContent className="pt-4 pb-3 space-y-3">
+            {/* Period presets */}
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-muted-foreground font-medium mr-1">Periode:</span>
+              <span className="text-xs text-muted-foreground font-medium">Periode:</span>
               {(['week', 'month', 'year'] as const).map(p => {
                 const labels: Record<string, string> = { week: 'Deze week', month: 'Deze maand', year: 'Dit jaar' };
                 return (
@@ -243,7 +233,7 @@ const Trips = () => {
               )}
             </div>
 
-            {/* Filters row */}
+            {/* Filter row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Voertuig</Label>
@@ -273,7 +263,7 @@ const Trips = () => {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Vanaf datum</Label>
+                <Label className="text-xs text-muted-foreground">Vanaf</Label>
                 <Input
                   type="date"
                   className="h-8 text-sm"
@@ -282,7 +272,7 @@ const Trips = () => {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Tot datum</Label>
+                <Label className="text-xs text-muted-foreground">Tot en met</Label>
                 <Input
                   type="date"
                   className="h-8 text-sm"
@@ -294,22 +284,12 @@ const Trips = () => {
           </CardContent>
         </Card>
 
-        {/* Main tabs */}
+        {/* Tabs: Per dag (default) and Lijst */}
         <Tabs defaultValue="daily">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="table">Rittenlijst</TabsTrigger>
-            <TabsTrigger value="daily">Dagrapport</TabsTrigger>
-            <TabsTrigger value="calendar">Kalender</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="daily">Per dag</TabsTrigger>
+            <TabsTrigger value="table">Lijst</TabsTrigger>
           </TabsList>
-
-          <TabsContent value="table" className="mt-4">
-            <TripsTable
-              refreshTrigger={refreshTrigger}
-              vehicles={vehicles}
-              filters={tableFilters}
-              onTripChanged={() => setRefreshTrigger(prev => prev + 1)}
-            />
-          </TabsContent>
 
           <TabsContent value="daily" className="mt-4">
             <DailyTripsView
@@ -323,13 +303,16 @@ const Trips = () => {
             />
           </TabsContent>
 
-          <TabsContent value="calendar" className="mt-4">
-            <TripsCalendar
+          <TabsContent value="table" className="mt-4">
+            <TripsTable
               refreshTrigger={refreshTrigger}
-              filters={{ vehicleId: selectedVehicle }}
+              vehicles={vehicles}
+              filters={tableFilters}
+              onTripChanged={() => setRefreshTrigger(prev => prev + 1)}
             />
           </TabsContent>
         </Tabs>
+
       </div>
     </div>
   );
