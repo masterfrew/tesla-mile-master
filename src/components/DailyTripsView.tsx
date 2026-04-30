@@ -498,8 +498,9 @@ export const DailyTripsView: React.FC<DailyTripsViewProps> = ({ refreshTrigger, 
                           {/* Inhoud */}
                           <div className="flex-1 min-w-0 space-y-1.5">
 
-                            {/* Tijden */}
-                            {!trip.isSynthetic && (
+                            {/* Tijden — alleen tonen voor handmatig ingevoerde ritten.
+                                Auto-sync heeft geen echte start/eindtijd (started_at = UTC-middernacht). */}
+                            {trip.is_manual && !trip.isSynthetic && (
                               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <Clock className="h-3 w-3 shrink-0" />
                                 <span>{formatTime(trip.started_at)}</span>

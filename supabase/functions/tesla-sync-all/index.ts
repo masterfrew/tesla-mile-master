@@ -391,7 +391,7 @@ async function upsertDailyTrip(
       const tripData = {
         vehicle_id: vehicleId,
         user_id: userId,
-        started_at: `${date}T00:00:00.000Z`,
+        started_at: `${date}T12:00:00.000Z`,  // Noon UTC — avoids confusing 02:00 display in NL timezone
         ended_at: now.toISOString(),
         start_odometer_km: startOdometer,
         end_odometer_km: endOdometer,
@@ -401,7 +401,7 @@ async function upsertDailyTrip(
         end_lat: latitude,
         end_lon: longitude,
         end_location: locationName,
-        purpose: 'personal',  // Default, user can change in the UI
+        purpose: 'business',  // Default for mileage registration
         is_manual: false,
         description: null,
         metadata: {
@@ -479,18 +479,8 @@ async function syncUserVehicles(
       // ALWAYS backfill missing days (even before trying API)
       await backfillMissingDays(supabase, vehicle.id, userId, lastReading, today, now);
 
-      // Wake up vehicle first
-      const wakeResult = await wakeUpVehicle(teslaApiBaseUrl, vehicle.tesla_vehicle_id, accessToken);
-      
-      if (!wakeResult.success) {
-        console.warn(`[tesla-sync-all] Vehicle ${vehicleName} could not be woken up`);
-        offline++;
-        errors.push(`${vehicleName}: Vehicle offline/asleep`);
-        await updateSyncStatus(supabase, vehicle.id, userId, false, true, wakeResult.error);
-        continue;
-      }
-
-      // Now fetch vehicle data with retries
+      // Fetch vehicle data — if the car is asleep we skip gracefully (no active wake-up,
+      // that was causing 20+ API calls per vehicle per sync hour)
       const result = await fetchVehicleDataWithRetry(
         teslaApiBaseUrl,
         vehicle.tesla_vehicle_id,
