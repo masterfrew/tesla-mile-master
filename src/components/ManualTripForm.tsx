@@ -27,6 +27,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Plus, MapPin, Car, Clock, Navigation } from 'lucide-react';
+import { LocationAutocomplete } from './LocationAutocomplete';
 
 const tripSchema = z.object({
   vehicle_id: z.string().min(1, 'Selecteer een voertuig'),
@@ -275,7 +276,11 @@ export const ManualTripForm: React.FC<ManualTripFormProps> = ({ vehicles, onTrip
                       Startlocatie
                     </FormLabel>
                     <FormControl>
-                      <Input placeholder="bijv. Kerkstraat 5, Amsterdam" {...field} />
+                      <LocationAutocomplete
+                        placeholder="bijv. Kerkstraat 5, Amsterdam"
+                        value={field.value}
+                        onChange={field.onChange}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -292,7 +297,11 @@ export const ManualTripForm: React.FC<ManualTripFormProps> = ({ vehicles, onTrip
                       Eindlocatie
                     </FormLabel>
                     <FormControl>
-                      <Input placeholder="bijv. Stationsplein 1, Utrecht" {...field} />
+                      <LocationAutocomplete
+                        placeholder="bijv. Stationsplein 1, Utrecht"
+                        value={field.value}
+                        onChange={field.onChange}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
