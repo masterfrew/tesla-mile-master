@@ -1,78 +1,75 @@
+## Plan: Losse ritten met start/eind-locatie — auto-detectie + handmatige invoer
 
-## Plan: Fix Build Errors + Comprehensive Trip UI Upgrade
+### Doel
 
-### Part 1: Fix Build Errors (3 files)
-
-**`supabase/functions/_shared/sheets.ts`**
-- Replace `assert { type: "json" }` with `with { type: "json" }` (import attributes syntax)
-- Add a fallback: if the JSON file doesn't exist, read credentials from an env variable `GOOGLE_SERVICE_ACCOUNT_JSON` instead — this avoids the "cannot find module" error at build time
-- Fix `alg` type: cast the header as `{ alg: Algorithm, typ: string }` using the djwt `Algorithm` type
-
-**`supabase/functions/backfill-sheets/index.ts`** (line 79)
-- Type the `error` catch variable: `catch (error: unknown)` and use `(error as Error).message`
-
-**`supabase/functions/tesla-sync-all/index.ts`** (line 649)
-- Change `null` to `undefined` in the `logAuditEvent` call
+Per dag elke afzonderlijke rit zien (tijd, van → naar, km), in plaats van alleen het dag-totaal. Gecombineerde aanpak: automatische detectie voor nieuwe ritten + makkelijke handmatige invoer voor historie en correcties.
 
 ---
 
-### Part 2: New Feature — Daily Trip Overview + Calendar View
+### Deel 1 — Automatische rit-detectie (nieuwe ritten)
 
-**New page: `/trips` (rewrite `src/pages/Trips.tsx`)**
-- Add a `Tabs` component with three views:
-  1. **Kalender** — monthly calendar grid, click a day → shows all trips for that day in a slide-out panel
-  2. **Per dag** — grouped list: each day is a collapsible section showing all trips with exact start/end times
-  3. **Alle ritten** — flat list (existing `NewTripsList`)
+**Hoe het werkt:**
+Tesla geeft via `vehicle_data` een `drive_state` met o.a. `shift_state` (`P`/`R`/`N`/`D`), `latitude`, `longitude`, `odometer`. Door dit elke ~5 min te pollen kunnen we transities detecteren:
+- `P` → `D`/`R` = **rit gestart** (sla startlocatie + km-stand op)
+- `D`/`R` → `P` (en blijft P) = **rit beëindigd** (sla eindlocatie + km-stand op, maak trip-record)
 
-**New component: `src/components/DailyTripsView.tsx`**
-- Groups trips by date
-- Each date row shows: total km for that day, trip count, expand/collapse
-- Inside each day: trip cards with exact departure time → arrival time, start location → end location, distance, purpose badge
+**Database wijzigingen:**
+Nieuwe tabel `vehicle_drive_state` voor per-voertuig laatste status:
+- `vehicle_id` (PK), `last_shift_state`, `last_odometer_km`, `last_lat`, `last_lon`, `trip_started_at`, `trip_start_odometer_km`, `trip_start_lat`, `trip_start_lon`, `trip_start_location`, `last_polled_at`
 
-**New component: `src/components/TripsCalendar.tsx`**
-- Monthly calendar grid using the existing `Calendar` (react-day-picker) component
-- Days with trips show a colored dot + total km
-- Clicking a day opens a panel/sheet showing that day's trips in detail
+Dit voorkomt dat we elke poll alle historie opnieuw lezen.
 
----
+**Nieuwe edge function `tesla-trip-detector`:**
+1. Voor elk actief voertuig: probeer wakker te maken (skip als slaapt > 15 min en geen bekende trip in progress).
+2. Haal huidige `vehicle_data` op (met `location_data=true`).
+3. Vergelijk met vorige `shift_state`:
+   - **Trip start**: zet `trip_started_at`, `trip_start_*` velden.
+   - **Trip end**: reverse-geocode start + eind via Nominatim, INSERT in `trips` met `is_manual=false`, purpose default `business`.
+4. Werk altijd `last_*` velden bij.
 
-### Part 3: Location Tracking Improvements
-
-**`src/components/ManualTripForm.tsx`** — already has location fields, no changes needed
-
-**`src/components/EditTripDialog.tsx`** — ensure start_location and end_location fields are present with editable inputs (add them if missing)
+**Cron:**
+Aparte cron-job elke 5 minuten voor `tesla-trip-detector` (de bestaande 4-uurs `tesla-sync-all` voor totaal-km blijft). Skip-logica om Tesla niet wakker te houden als auto al lang slaapt.
 
 ---
 
-### Part 4: Enhanced CSV Export
+### Deel 2 — Handmatige invoer per dag (UI)
 
-**`src/components/NewTripsList.tsx`** — update `exportToCSV()`:
-- Columns: Datum, Vertrektijd, Aankomsttijd, Duur (min), Startlocatie, Eindlocatie, Afstand (km), Start km-stand, Eind km-stand, Type rit, Voertuig, Beschrijving
-- Adds a totals row at the bottom
-- File name: `ritregistratie-YYYY-MM-DD.csv` with BOM for Excel compatibility
+**`DailyTripsView`:**
+- Knop **"+ Rit toevoegen"** bovenin elke dag-kaart. Opent `ManualTripForm` met die datum voorgeselecteerd.
+- Onder een dag die alleen een synthetische totaalrit heeft: helder bannertje "Tesla detecteerde {X} km — splits op in losse ritten" met dezelfde knop.
+- De synthetische rit verdwijnt automatisch zodra er ≥1 echte trip op die dag staat (huidige logica blijft).
 
----
-
-### Part 5: Dashboard Recent Trips Widget
-
-**`src/pages/Dashboard.tsx`** — add a "Recente ritten" card below the stats:
-- Shows last 5 trips from the `trips` table
-- Each row: date, start → end location, distance, purpose badge
-- Link to `/trips` for full overview
+**`ManualTripForm`:**
+- Accepteer optionele `defaultDate` prop zodat de datum is voorgevuld vanuit dag-kaart.
 
 ---
 
-### Files to change
+### Deel 3 — Schema & secrets
 
-```text
-supabase/functions/_shared/sheets.ts           ← fix 3 build errors
-supabase/functions/backfill-sheets/index.ts    ← fix error typing
-supabase/functions/tesla-sync-all/index.ts     ← fix null → undefined
-src/components/NewTripsList.tsx                ← enhanced CSV export
-src/components/EditTripDialog.tsx              ← ensure location fields
-src/components/DailyTripsView.tsx              ← new: grouped by day
-src/components/TripsCalendar.tsx               ← new: calendar view
-src/pages/Trips.tsx                            ← rewrite with tabs
-src/pages/Dashboard.tsx                        ← add recent trips widget
-src/App.tsx                                    ← no changes needed
+**Migratie:**
+- `CREATE TABLE public.vehicle_drive_state` met RLS (eigenaar = `vehicles.user_id`).
+- Geen wijzigingen aan `trips` tabel nodig (heeft al `start_location`, `end_location`, `start_odometer_km`, `end_odometer_km`).
+
+**Secrets:** `TESLA_CLIENT_ID`, `TESLA_CLIENT_SECRET`, `CRON_SECRET` zijn al aanwezig — geen nieuwe nodig.
+
+---
+
+### Bestanden
+
 ```
+supabase/migrations/<timestamp>_vehicle_drive_state.sql      ← nieuw
+supabase/functions/tesla-trip-detector/index.ts              ← nieuw
+src/components/DailyTripsView.tsx                            ← + "Rit toevoegen" knop per dag
+src/components/ManualTripForm.tsx                            ← + defaultDate prop
+```
+
+Plus een kleine SQL via insert-tool om de 5-min cron te registreren (bevat anon key en URL, daarom geen migratie).
+
+---
+
+### Belangrijke kanttekeningen
+
+- **Geen historie**: auto-detectie werkt alleen vóór ritten ná activatie. Voor oude dagen blijft handmatige invoer nodig.
+- **Slapende auto**: als de Tesla > 15 min slaapt en er was geen trip in progress, slaan we de poll over. Dit voorkomt extra accuverbruik.
+- **Reverse-geocoding**: hergebruikt bestaande `_shared/geocoding.ts` (Nominatim).
+- **API-volume**: ~288 calls/dag/voertuig (5-min poll) — ruim binnen Tesla Fleet API limiet.
