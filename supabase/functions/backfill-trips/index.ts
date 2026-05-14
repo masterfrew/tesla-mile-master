@@ -17,18 +17,14 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * a corresponding trip. Called by the user after connect/sync to fill in
  * historical gaps.
  *
- * Each mileage_reading becomes one trip per day:
- *   - start location = previous day's mileage_reading location (if any)
- *   - end location   = this day's mileage_reading location
- *   - start odometer = previous day's odometer_km
- *   - end odometer   = this day's odometer_km
- *   - purpose        = 'business' (can be edited by user afterwards)
+ * NOTE: The mileage_readings table uses "reading_date" (not "date") as the
+ * date column name.
  */
 
 interface MileageReading {
   id: string;
   vehicle_id: string;
-  date: string; // YYYY-MM-DD
+  reading_date: string; // YYYY-MM-DD  ← correct column name
   daily_km: number;
   odometer_km: number;
   location_name: string | null;
@@ -68,14 +64,14 @@ serve(async (req) => {
 
     console.log('[backfill-trips] User:', user.id);
 
-    // ── 1. Get all mileage_readings with km > 0, ordered by vehicle + date ──────
+    // ── 1. Get all mileage_readings with km > 0, ordered by vehicle + reading_date ──
     const { data: readings, error: readingsError } = await supabase
       .from('mileage_readings')
-      .select('id, vehicle_id, date, daily_km, odometer_km, location_name, metadata')
+      .select('id, vehicle_id, reading_date, daily_km, odometer_km, location_name, metadata')
       .eq('user_id', user.id)
       .gt('daily_km', 0)
       .order('vehicle_id')
-      .order('date', { ascending: true });
+      .order('reading_date', { ascending: true });
 
     if (readingsError) {
       throw new Error(`Failed to fetch mileage_readings: ${readingsError.message}`);
@@ -123,10 +119,9 @@ serve(async (req) => {
 
     // ── 4. For each vehicle, process readings chronologically ─────────────────
     for (const [vehicleId, vehicleReadings] of Object.entries(byVehicle)) {
-      // Already sorted ascending by date from the query
       for (let i = 0; i < vehicleReadings.length; i++) {
         const reading = vehicleReadings[i];
-        const lookupKey = `${vehicleId}|${reading.date}`;
+        const lookupKey = `${vehicleId}|${reading.reading_date}`;
 
         if (existingTripDates.has(lookupKey)) {
           skipped++;
@@ -156,7 +151,7 @@ serve(async (req) => {
             const geo = await reverseGeocode(endLat, endLon);
             if (geo) endLocation = geo.shortName;
           } catch (e) {
-            console.error(`[backfill-trips] Geocoding failed for ${reading.date}:`, e);
+            console.error(`[backfill-trips] Geocoding failed for ${reading.reading_date}:`, e);
           }
         }
 
@@ -173,8 +168,8 @@ serve(async (req) => {
         const tripData = {
           vehicle_id: vehicleId,
           user_id: user.id,
-          started_at: `${reading.date}T00:00:00.000Z`,
-          ended_at: `${reading.date}T23:59:59.000Z`,
+          started_at: `${reading.reading_date}T00:00:00.000Z`,
+          ended_at: `${reading.reading_date}T23:59:59.000Z`,
           start_odometer_km: startOdometer,
           end_odometer_km: endOdometer,
           start_location: startLocation,
@@ -194,11 +189,10 @@ serve(async (req) => {
 
         const { error: insertError } = await supabase.from('trips').insert(tripData);
         if (insertError) {
-          console.error(`[backfill-trips] Insert failed for ${reading.date}:`, insertError.message);
+          console.error(`[backfill-trips] Insert failed for ${reading.reading_date}:`, insertError.message);
           skipped++;
         } else {
-          console.log(`[backfill-trips] Created trip: ${reading.date} ${startLocation || '?'} → ${endLocation || '?'} (${reading.daily_km} km)`);
-          // Mark as created so we don't duplicate within this run
+          console.log(`[backfill-trips] Created trip: ${reading.reading_date} ${startLocation || '?'} → ${endLocation || '?'} (${reading.daily_km} km)`);
           existingTripDates.add(lookupKey);
           created++;
         }
