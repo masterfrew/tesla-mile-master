@@ -119,7 +119,7 @@ async function fetchVehicleDataWithRetry(
       console.log(`[tesla-sync-all] Attempt ${attempt}/${retries} for vehicle ${vehicleId}`);
       
       const response = await fetch(
-        `${teslaApiBaseUrl}/api/1/vehicles/${vehicleId}/vehicle_data`,
+        `${teslaApiBaseUrl}/api/1/vehicles/${vehicleId}/vehicle_data?location_data=true`,
         {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -479,8 +479,45 @@ async function syncUserVehicles(
       // ALWAYS backfill missing days (even before trying API)
       await backfillMissingDays(supabase, vehicle.id, userId, lastReading, today, now);
 
-      // Fetch vehicle data — if the car is asleep we skip gracefully (no active wake-up,
-      // that was causing 20+ API calls per vehicle per sync hour)
+      // Try waking up the vehicle to get GPS coordinates
+      // Without wake-up, the Fleet API returns odometer but no GPS when asleep
+      try {
+        console.log(`[tesla-sync-all] Waking up ${vehicleName}...`);
+        await fetch(
+          `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/wake_up`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        // Poll until online (max 20s)
+        const wakeStart = Date.now();
+        while (Date.now() - wakeStart < 20000) {
+          await sleep(3000);
+          try {
+            const r = await fetch(
+              `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (r.ok) {
+              const s = await r.json();
+              if (s.response?.state === 'online') {
+                console.log(`[tesla-sync-all] ${vehicleName} online`);
+                // Small extra wait for drive_state to populate
+                await sleep(2000);
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (e) {
+        console.log(`[tesla-sync-all] Wake-up failed for ${vehicleName}`);
+      }
+
+      // Fetch vehicle data — now hopefully with GPS coordinates
       const result = await fetchVehicleDataWithRetry(
         teslaApiBaseUrl,
         vehicle.tesla_vehicle_id,

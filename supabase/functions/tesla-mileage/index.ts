@@ -218,7 +218,7 @@ serve(async (req) => {
         console.log(`[tesla-mileage] Fetching data for vehicle ${vehicle.tesla_vehicle_id}`);
 
         const vehicleDataResponse = await fetch(
-          `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data`,
+          `${teslaApiBaseUrl}/api/1/vehicles/${vehicle.tesla_vehicle_id}/vehicle_data?location_data=true`,
           {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
