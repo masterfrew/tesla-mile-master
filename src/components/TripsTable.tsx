@@ -69,7 +69,7 @@ interface TripsTableProps {
   onTripChanged: () => void;
 }
 
-type SortField = 'date' | 'from' | 'to' | 'km';
+type SortField = 'date' | 'from' | 'to' | 'km' | 'start_time';
 type SortDir = 'asc' | 'desc';
 
 const DAY_NAMES = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
@@ -77,6 +77,12 @@ const DAY_NAMES = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
 function formatDate(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function formatTime(iso: string | null) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
 }
 
 function getDayName(iso: string) {
@@ -154,6 +160,7 @@ export const TripsTable: React.FC<TripsTableProps> = ({
     if (sortField === 'date') cmp = a.started_at.localeCompare(b.started_at);
     else if (sortField === 'from') cmp = (a.start_location ?? '').localeCompare(b.start_location ?? '');
     else if (sortField === 'to') cmp = (a.end_location ?? '').localeCompare(b.end_location ?? '');
+    else if (sortField === 'start_time') cmp = a.started_at.localeCompare(b.started_at);
     else if (sortField === 'km') cmp = calcKm(a) - calcKm(b);
     return sortDir === 'asc' ? cmp : -cmp;
   });
@@ -179,6 +186,8 @@ export const TripsTable: React.FC<TripsTableProps> = ({
     return sorted.map(trip => ({
       Datum: formatDate(trip.started_at),
       Dag: getDayName(trip.started_at),
+      'Vertrek': formatTime(trip.started_at),
+      'Aankomst': formatTime(trip.ended_at),
       Van: trip.start_location ?? '',
       Naar: trip.end_location ?? '',
       'KM': calcKm(trip),
@@ -234,6 +243,8 @@ export const TripsTable: React.FC<TripsTableProps> = ({
     ws['!cols'] = [
       { wch: 12 }, // Datum
       { wch: 5 },  // Dag
+      { wch: 8 },  // Vertrek
+      { wch: 8 },  // Aankomst
       { wch: 28 }, // Van
       { wch: 28 }, // Naar
       { wch: 8 },  // KM
@@ -332,6 +343,8 @@ export const TripsTable: React.FC<TripsTableProps> = ({
                 <tr>
                   <Th field="date" label="Datum" />
                   <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Dag</th>
+                  <Th field="start_time" label="Vertrek" />
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Aankomst</th>
                   <Th field="from" label="Van" />
                   <Th field="to" label="Naar" />
                   <Th field="km" label="KM" />
@@ -355,10 +368,16 @@ export const TripsTable: React.FC<TripsTableProps> = ({
                       <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
                         {getDayName(trip.started_at)}
                       </td>
-                      <td className="px-3 py-2 max-w-[200px] truncate" title={trip.start_location ?? ''}>
+                      <td className="px-3 py-2 whitespace-nowrap tabular-nums text-muted-foreground">
+                        {formatTime(trip.started_at)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap tabular-nums text-muted-foreground">
+                        {formatTime(trip.ended_at)}
+                      </td>
+                      <td className="px-3 py-2 max-w-[160px] truncate" title={trip.start_location ?? ''}>
                         {trip.start_location || <span className="text-muted-foreground/50">—</span>}
                       </td>
-                      <td className="px-3 py-2 max-w-[200px] truncate" title={trip.end_location ?? ''}>
+                      <td className="px-3 py-2 max-w-[160px] truncate" title={trip.end_location ?? ''}>
                         {trip.end_location || <span className="text-muted-foreground/50">—</span>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap tabular-nums font-medium text-right">

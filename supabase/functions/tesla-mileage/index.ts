@@ -12,16 +12,15 @@ const corsHeaders = {
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Create or update a daily trip record in the `trips` table.
- * If a trip already exists for this vehicle+day, update the end location.
- * If not, create a new trip using the previous trip's end location as start.
+ * Create or update a trip record per drive segment.
+ * Creates a NEW trip when the car has moved to a different location.
+ * Otherwise updates the current open trip with latest odometer/time.
  */
-async function upsertDailyTrip(
+async function upsertTrip(
   supabase: any,
   params: {
     vehicleId: string;
     userId: string;
-    date: string;
     startOdometer: number;
     endOdometer: number;
     dailyKm: number;
@@ -32,95 +31,97 @@ async function upsertDailyTrip(
     now: Date;
   }
 ): Promise<void> {
-  const { vehicleId, userId, date, startOdometer, endOdometer, dailyKm, latitude, longitude, locationName, geocodeResult, now } = params;
+  const { vehicleId, userId, startOdometer, endOdometer, dailyKm, latitude, longitude, locationName, geocodeResult, now } = params;
 
   try {
-    const dayStart = `${date}T00:00:00.000Z`;
-    const dayEnd = `${date}T23:59:59.999Z`;
+    const nowIso = now.toISOString();
 
-    const { data: existingTrip } = await supabase
+    // Find the most recent trip for this vehicle
+    const { data: lastTrip } = await supabase
       .from('trips')
-      .select('id, start_lat, start_lon, start_location, start_odometer_km')
+      .select('id, end_location, ended_at, end_odometer_km')
       .eq('vehicle_id', vehicleId)
       .eq('user_id', userId)
       .eq('is_manual', false)
-      .gte('started_at', dayStart)
-      .lte('started_at', dayEnd)
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (existingTrip) {
-      // Update end location
-      const updateData: Record<string, any> = {
-        ended_at: now.toISOString(),
-        end_odometer_km: endOdometer,
-        updated_at: now.toISOString(),
-        metadata: {
-          last_sync: now.toISOString(),
-          daily_km: dailyKm,
-          geocode_end: geocodeResult ? {
-            display_name: geocodeResult.displayName,
-            city: geocodeResult.city,
-            road: geocodeResult.road,
-          } : null,
-        },
-      };
-
-      if (latitude && longitude) {
-        updateData.end_lat = latitude;
-        updateData.end_lon = longitude;
-        updateData.end_location = locationName;
-      }
-
-      await supabase.from('trips').update(updateData).eq('id', existingTrip.id);
-      console.log(`[tesla-mileage] Updated trip ${existingTrip.id} end: ${locationName}`);
-    } else {
-      // Get previous trip's end location to use as this trip's start
-      const { data: prevTrip } = await supabase
-        .from('trips')
-        .select('end_lat, end_lon, end_location')
-        .eq('vehicle_id', vehicleId)
-        .eq('user_id', userId)
-        .eq('is_manual', false)
-        .lt('started_at', dayStart)
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      let startLocation = prevTrip?.end_location || null;
-      let startLat = prevTrip?.end_lat || null;
-      let startLon = prevTrip?.end_lon || null;
-
-      // If we have previous coords but no location, try geocoding them
-      if (startLat && startLon && !startLocation) {
-        try {
-          await sleep(1100); // Nominatim rate limit
-          const geo = await reverseGeocode(startLat, startLon);
-          if (geo) startLocation = geo.shortName;
-        } catch (e) {
-          console.error('[tesla-mileage] Start geocoding failed:', e);
-        }
-      }
-
-      const tripData: Record<string, any> = {
+    if (!lastTrip) {
+      // First ever trip — create it
+      const insertData: Record<string, any> = {
         vehicle_id: vehicleId,
         user_id: userId,
-        started_at: `${date}T00:00:00.000Z`,
-        ended_at: now.toISOString(),
+        started_at: nowIso,
+        ended_at: nowIso,
+        start_odometer_km: endOdometer,
+        end_odometer_km: endOdometer,
+        start_location: locationName,
+        end_location: locationName,
+        start_lat: latitude,
+        start_lon: longitude,
+        end_lat: latitude,
+        end_lon: longitude,
+        purpose: 'business',
+        is_manual: false,
+        metadata: { first_sync: true, created_at: nowIso },
+      };
+      await supabase.from('trips').insert(insertData);
+      console.log(`[tesla-mileage] Created first trip at ${locationName || '?'} (${endOdometer} km)`);
+      return;
+    }
+
+    // Is the location significantly different from the last trip's end location?
+    const lastLoc = lastTrip.end_location || '';
+    const newLoc = locationName || '';
+    const locationChanged = newLoc && lastLoc &&
+      newLoc.toLowerCase() !== lastLoc.toLowerCase() &&
+      !newLoc.includes(lastLoc) && !lastLoc.includes(newLoc);
+
+    // If location changed, close the last trip and start a new one
+    if (locationChanged) {
+      // Close the last trip
+      if (!lastTrip.ended_at || lastTrip.ended_at === lastTrip.started_at) {
+        await supabase.from('trips').update({
+          ended_at: nowIso,
+          end_odometer_km: startOdometer,
+          end_location: locationName,
+          end_lat: latitude,
+          end_lon: longitude,
+          updated_at: nowIso,
+          metadata: {
+            last_sync: nowIso,
+            daily_km: dailyKm,
+            closed_by: 'location_change',
+            geocode_end: geocodeResult ? {
+              display_name: geocodeResult.displayName,
+              city: geocodeResult.city,
+              road: geocodeResult.road,
+            } : null,
+          },
+        }).eq('id', lastTrip.id);
+        console.log(`[tesla-mileage] Closed trip ${lastTrip.id} at ${locationName}`);
+      }
+
+      // Create new trip
+      const insertData: Record<string, any> = {
+        vehicle_id: vehicleId,
+        user_id: userId,
+        started_at: nowIso,
+        ended_at: nowIso,
         start_odometer_km: startOdometer,
         end_odometer_km: endOdometer,
-        start_location: startLocation,
-        start_lat: startLat,
-        start_lon: startLon,
+        start_location: locationName,
         end_location: locationName,
+        start_lat: latitude,
+        start_lon: longitude,
         end_lat: latitude,
         end_lon: longitude,
         purpose: 'business',
         is_manual: false,
         metadata: {
           created_by: 'tesla-mileage',
-          last_sync: now.toISOString(),
+          last_sync: nowIso,
           daily_km: dailyKm,
           geocode_end: geocodeResult ? {
             display_name: geocodeResult.displayName,
@@ -129,13 +130,28 @@ async function upsertDailyTrip(
           } : null,
         },
       };
-
-      const { error: insertError } = await supabase.from('trips').insert(tripData);
-      if (insertError) {
-        console.error('[tesla-mileage] Failed to create trip:', insertError);
-      } else {
-        console.log(`[tesla-mileage] Created trip: ${startLocation || '?'} → ${locationName || '?'} (${dailyKm} km)`);
-      }
+      await supabase.from('trips').insert(insertData);
+      console.log(`[tesla-mileage] Created trip: ${locationName || '?'} (${endOdometer} km)`);
+    } else {
+      // Same-ish location — just update the last trip's end data
+      await supabase.from('trips').update({
+        ended_at: nowIso,
+        end_odometer_km: endOdometer,
+        end_location: locationName,
+        end_lat: latitude,
+        end_lon: longitude,
+        updated_at: nowIso,
+        metadata: {
+          last_sync: nowIso,
+          daily_km: dailyKm,
+          geocode_end: geocodeResult ? {
+            display_name: geocodeResult.displayName,
+            city: geocodeResult.city,
+            road: geocodeResult.road,
+          } : null,
+        },
+      }).eq('id', lastTrip.id);
+      console.log(`[tesla-mileage] Updated trip ${lastTrip.id}: ${locationName || '?'} @ ${endOdometer} km`);
     }
   } catch (error) {
     console.error('[tesla-mileage] Trip upsert error:', error);
@@ -319,10 +335,9 @@ serve(async (req) => {
           console.log(`[tesla-mileage] Mileage stored: ${odometerKm} km, +${dailyKm} km today`);
 
           // Also create/update trip record for rich start/end location display
-          await upsertDailyTrip(supabase, {
+          await upsertTrip(supabase, {
             vehicleId: vehicle.id,
             userId: user.id,
-            date: today,
             startOdometer: prevOdometer,
             endOdometer: odometerKm,
             dailyKm,
