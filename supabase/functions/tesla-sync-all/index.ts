@@ -553,13 +553,36 @@ async function syncUserVehicles(
       const chargeState = result.data?.response?.charge_state || {};
       const vehicleState = result.data?.response?.vehicle_state || {};
 
-      const latitude = driveState.latitude || null;
-      const longitude = driveState.longitude || null;
+      let latitude = driveState.latitude || null;
+      let longitude = driveState.longitude || null;
       const heading = driveState.heading || null;
       const speed = driveState.speed || null; // mph, null if parked
       const shiftState = driveState.shift_state || null; // D, R, P, N, or null
       const nativeLocationSupported = driveState.native_location_supported ?? null;
       const activeRouteDestination = driveState.active_route_destination || null;
+
+      // If GPS is null (car asleep), fall back to last known position from recent sync
+      if (!latitude || !longitude) {
+        const { data: lastGpsReading } = await supabase
+          .from('mileage_readings')
+          .select('metadata')
+          .eq('vehicle_id', vehicle.id)
+          .not('metadata', 'is', null)
+          .order('reading_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (lastGpsReading?.metadata) {
+          const meta = lastGpsReading.metadata;
+          const fallbackLat = meta.latitude ?? meta.lat ?? null;
+          const fallbackLon = meta.longitude ?? meta.lon ?? null;
+          if (fallbackLat && fallbackLon) {
+            latitude = fallbackLat;
+            longitude = fallbackLon;
+            console.log(`[tesla-sync-all] GPS null, using last known: ${latitude},${longitude}`);
+          }
+        }
+      }
 
       // Reverse geocode current position to get a readable address
       let locationName = activeRouteDestination;
@@ -575,10 +598,10 @@ async function syncUserVehicles(
           }
         } catch (geoError) {
           console.error('[tesla-sync-all] Geocoding failed:', geoError);
-          // Fall back to active_route_destination or coordinates
-          if (!locationName && latitude && longitude) {
-            locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-          }
+        }
+        // Always store coordinates as fallback location if geocoding had no result
+        if (!locationName) {
+          locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
         }
         // Respect Nominatim rate limit (1 req/sec) before any subsequent geocode calls
         await sleep(1100);

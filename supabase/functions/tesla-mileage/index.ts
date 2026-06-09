@@ -262,11 +262,34 @@ serve(async (req) => {
         const today = now.toISOString().split('T')[0];
 
         const driveState = vehicleData.response?.drive_state || {};
-        const latitude = driveState.latitude || null;
-        const longitude = driveState.longitude || null;
+        let latitude = driveState.latitude || null;
+        let longitude = driveState.longitude || null;
         const heading = driveState.heading || null;
         const speed = driveState.speed || null;
         const activeRouteDestination = driveState.active_route_destination || null;
+
+        // If GPS is null (car asleep), fall back to last known position
+        if (!latitude || !longitude) {
+          const { data: lastGpsReading } = await supabase
+            .from('mileage_readings')
+            .select('metadata')
+            .eq('vehicle_id', vehicle.id)
+            .not('metadata', 'is', null)
+            .order('reading_date', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (lastGpsReading?.metadata) {
+            const meta = lastGpsReading.metadata;
+            const fbLat = meta.latitude ?? meta.lat ?? null;
+            const fbLon = meta.longitude ?? meta.lon ?? null;
+            if (fbLat && fbLon) {
+              latitude = fbLat;
+              longitude = fbLon;
+              console.log(`[tesla-mileage] GPS null, using last known: ${latitude},${longitude}`);
+            }
+          }
+        }
 
         // Reverse geocode current position
         let locationName: string | null = activeRouteDestination;
@@ -280,9 +303,10 @@ serve(async (req) => {
             }
           } catch (geoError) {
             console.error('[tesla-mileage] Geocoding failed:', geoError);
-            if (!locationName) {
-              locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-            }
+          }
+          // Always store coordinates as fallback if geocoding failed
+          if (!locationName) {
+            locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
           }
           // Respect Nominatim rate limit
           await sleep(1100);
